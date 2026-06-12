@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from coupangads.adapters.base import TextAdapter
-from coupangads.core import config
+from coupangads.core import config  # noqa: F401
 from coupangads.infra.io import write_text_file
 from coupangads.text.template_loader import TemplateLoader, assemble_text_prompt
 
