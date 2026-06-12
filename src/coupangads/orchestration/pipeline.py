@@ -50,7 +50,7 @@ class ProductPipeline:
             return True
         target_mtime = target.stat().st_mtime
         for dep in dependencies:
-            if dep.exists() and dep.stat().st_mtime > target_mtime:
+            if not dep.exists() or dep.stat().st_mtime > target_mtime:
                 return True
         return False
 
@@ -171,13 +171,27 @@ class ProductPipeline:
         )
 
         # 9. 图片生成
-        generate_detail_images(
-            self.image_adapter,
-            prompts,
-            refs,
-            product_output_dir,
-            max_images=self.max_images,
-            start_from=self.start_from,
-        )
+        if self.start_from is None:
+            prompts_to_run = [
+                p
+                for p in prompts
+                if self._needs_run(
+                    product_output_dir / p.filename, prompts_path, context_path
+                )
+            ]
+        else:
+            prompts_to_run = prompts
+
+        if prompts_to_run:
+            generate_detail_images(
+                self.image_adapter,
+                prompts_to_run,
+                refs,
+                product_output_dir,
+                max_images=self.max_images,
+                start_from=self.start_from,
+            )
+        else:
+            logger.info("所有图片已存在且上游未变更，跳过图片生成")
 
         logger.info(f"{product_input_dir.name} 处理完成")
