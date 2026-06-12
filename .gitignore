@@ -29,3 +29,6 @@ htmlcov/
 
 # Brainstorming / visual companion outputs
 .superpowers/
+
+# Git worktrees
+.worktrees/
