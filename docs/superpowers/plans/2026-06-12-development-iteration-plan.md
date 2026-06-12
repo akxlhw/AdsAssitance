@@ -3,11 +3,11 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 按任务逐步实施。步骤使用复选框 `- [ ]` 语法以便跟踪。
 > **注意：** 本仓库当前仅有规划文档，无任何源码、构建配置或测试。所有实现需从零开始。
 
-**Goal:** 制定 CoupangAds 从当前文档状态到可运行 CLI 工具的迭代路线图，重点交付 v1.0 MVP，并给出 v1.5、v2.0 的演进方向。
+**Goal:** 制定 CoupangAds 从当前文档状态到可运行工具的迭代路线图，重点交付 v1.0 MVP（本地 Web UI + 保留 CLI），并给出 v1.5、v2.0 的演进方向。
 
-**Architecture:** 采用 Python 单体 CLI 架构，分层为表现层（argparse 入口）、编排层（单产品流程编排 + 文件系统状态推断）、业务逻辑层（文本/图像生成服务 + 解析服务）、适配层（Gemini/Doubao Client Adapter）、基础设施层（IO/图像/日志/密钥）。状态通过输出目录文件存在性推断，无数据库。
+**Architecture:** 采用 Python 单体架构，表现层同时提供本地 Web UI（FastAPI + 纯 HTML/CSS/JS）与 argparse CLI 入口；编排层负责单产品流程编排 + 文件系统状态推断；业务逻辑层包含文本/图像生成服务与解析服务；适配层封装 Gemini/Doubao Client；基础设施层处理 IO/图像/日志/密钥。状态通过输出目录文件存在性推断，无数据库。
 
-**Tech Stack:** Python 3.10+、pytest、Pillow、pillow-heif、google-genai、openai（Doubao 线路）、argparse、pathlib。
+**Tech Stack:** Python 3.10+、FastAPI、pytest、Pillow、pillow-heif、google-genai、openai（Doubao 线路）、argparse、pathlib。
 
 ---
 
@@ -31,7 +31,7 @@
 
 | 迭代 | 目标 | 周期（建议） | 核心交付物 |
 |------|------|-------------|-----------|
-| **迭代一：v1.0 MVP** | 可运行的完整版 CLI，单产品全链路通 | 4~6 周 | `完整版入口.py`、模板库、核心模块、pytest 单元测试 |
+| **迭代一：v1.0 MVP** | 可运行的本地 Web UI + CLI，单产品全链路通 | 5~7 周 | FastAPI 后端、单页 Web UI、6 主题、CLI 入口、模板库、pytest 单元测试 |
 | **迭代二：v1.5 质量增强** | 提升输出质量、降低审核负担、偿还技术债务 | 3~4 周 | 质量审核层、敏感词过滤、批量优化、单元测试覆盖率 ≥ 90% |
 | **迭代三：v2.0 平台化** | 从单机工具演进为 Web 平台 MVP | 8~12 周 | Web 上传、Celery 队列、用户系统、对象存储 |
 
@@ -60,6 +60,29 @@ CoupangAds/
 │       │   ├── full_pipeline.py        # 完整版入口
 │       │   ├── classic_pipeline.py     # 经典版入口
 │       │   └── doubao_pipeline.py      # 备用线路入口
+│       ├── web/                        # 新增：本地 Web UI
+│       │   ├── __init__.py
+│       │   ├── app.py                  # FastAPI 应用
+│       │   ├── api.py                  # API 路由
+│       │   ├── static/
+│       │   │   ├── css/
+│       │   │   │   ├── base.css
+│       │   │   │   ├── components.css
+│       │   │   │   └── themes/
+│       │   │   │       ├── korean-minimal.css
+│       │   │   │       ├── editorial.css
+│       │   │   │       ├── warm-healing.css
+│       │   │   │       ├── dark-industrial.css
+│       │   │   │       ├── retro-film.css
+│       │   │   │       └── cyber-neon.css
+│       │   │   └── js/
+│       │   │       ├── main.js
+│       │   │       ├── theme.js
+│       │   │       ├── upload.js
+│       │   │       ├── progress.js
+│       │   │       └── gallery.js
+│       │   └── templates/
+│       │       └── index.html
 │       ├── core/
 │       │   ├── __init__.py
 │       │   ├── config.py               # 常量、默认路径、模型名
@@ -108,7 +131,12 @@ CoupangAds/
 │   ├── test_parsers.py
 │   ├── test_prompt_assembler.py
 │   ├── test_reference_selector.py
-│   └── test_orchestration.py
+│   ├── test_orchestration.py
+│   ├── test_web_api.py
+│   └── e2e/
+│       ├── __init__.py
+│       ├── test_full_pipeline.py       # CLI 端到端
+│       └── test_web_pipeline.py        # Web UI 端到端
 └── raw-material/                       # 默认输入目录（空或放示例）
 ```
 
@@ -1891,7 +1919,694 @@ git commit -m "feat: 单产品全流程编排与断点续跑逻辑，含集成�
 
 ---
 
-### Task 13: 完整版 CLI 入口
+### 新增：Web UI 实现任务（基于 `docs/superpowers/specs/2026-06-12-frontend-design.md`）
+
+> 从 MVP 开始提供本地 Web UI，与 CLI 共用同一套生成链路。
+
+---
+
+### Task 13: Web UI 基础设施
+
+**Files:**
+- Modify: `pyproject.toml`
+- Create: `src/coupangads/web/__init__.py`
+- Create: `src/coupangads/web/app.py`
+- Create: `src/coupangads/web/templates/index.html`
+
+- [ ] **Step 1: 添加 FastAPI 依赖**
+
+在 `pyproject.toml` 的 `dependencies` 中追加：
+
+```toml
+"fastapi>=0.115",
+"uvicorn[standard]>=0.32",
+"python-multipart>=0.0.17",
+```
+
+- [ ] **Step 2: 实现 `src/coupangads/web/app.py`**
+
+```python
+"""FastAPI Web 应用入口。"""
+
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+app = FastAPI(title="CoupangAds", version="0.1.0")
+
+BASE_DIR = Path(__file__).parent
+TEMPLATES_DIR = BASE_DIR / "templates"
+STATIC_DIR = BASE_DIR / "static"
+
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/")
+def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+```
+
+> `Request` 需从 `fastapi` 导入并作为参数注入。
+
+- [ ] **Step 3: 创建最小 `src/coupangads/web/templates/index.html`**
+
+```html
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="korean-minimal">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CoupangAds</title>
+  <link rel="stylesheet" href="/static/css/base.css">
+</head>
+<body>
+  <h1>CoupangAds</h1>
+  <script src="/static/js/main.js"></script>
+</body>
+</html>
+```
+
+- [ ] **Step 4: 验证服务可启动**
+
+Run:
+```bash
+uvicorn coupangads.web.app:app --reload --port 8000
+```
+
+Expected: 访问 `http://localhost:8000` 看到标题。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pyproject.toml src/coupangads/web/
+git commit -m "feat: FastAPI Web UI 基础设施"
+```
+
+---
+
+### Task 14: Web API 路由
+
+**Files:**
+- Create: `src/coupangads/web/api.py`
+- Modify: `src/coupangads/web/app.py`
+- Create: `tests/test_web_api.py`
+
+- [ ] **Step 1: 实现 `src/coupangads/web/api.py`**
+
+```python
+"""Web API 路由。"""
+
+import asyncio
+import zipfile
+from pathlib import Path
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
+
+from coupangads.core import config
+
+router = APIRouter(prefix="/api")
+
+# 内存中的任务状态（MVP 简版，v2.0 迁移到数据库）
+_task_states: dict[str, dict] = {}
+
+
+@router.post("/upload")
+async def upload_product(
+    product_name: str = Form(...),
+    files: list[UploadFile] = File(...),
+):
+    """上传产品图。"""
+    product_dir = config.DEFAULT_INPUT_DIR / product_name
+    product_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = []
+    for file in files:
+        target = product_dir / file.filename
+        content = await file.read()
+        target.write_bytes(content)
+        saved.append(file.filename)
+
+    return {"product_id": product_name, "file_count": len(saved)}
+
+
+@router.post("/generate/{product_id}")
+async def generate_product(product_id: str):
+    """触发生成（后台任务）。"""
+    _task_states[product_id] = {"status": "pending", "progress": 0}
+    # 实际实现将调用 ProductPipeline 在后台运行
+    return {"status": "started", "product_id": product_id}
+
+
+@router.get("/progress/{product_id}")
+async def progress_stream(product_id: str):
+    """SSE 实时进度流。"""
+    from fastapi.responses import StreamingResponse
+
+    async def event_generator():
+        while True:
+            state = _task_states.get(product_id, {"progress": 0, "status": "unknown"})
+            yield f"data: {state}\n\n"
+            if state.get("status") in ("completed", "error"):
+                break
+            await asyncio.sleep(1)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/result/{product_id}")
+async def get_result(product_id: str):
+    """获取结果文件列表。"""
+    output_dir = config.DEFAULT_OUTPUT_DIR / product_id
+    if not output_dir.exists():
+        raise HTTPException(status_code=404, detail="Output not found")
+
+    text_files = [p.name for p in output_dir.glob("*.md") if p.name != config.RUN_LOG_FILE]
+    images = [p.name for p in output_dir.glob("*.png")]
+    return {"product_id": product_id, "text_files": text_files, "images": images}
+
+
+@router.get("/download/{product_id}")
+async def download_product(product_id: str):
+    """下载 ZIP 资产包。"""
+    output_dir = config.DEFAULT_OUTPUT_DIR / product_id
+    zip_path = output_dir / f"{product_id}.zip"
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for file in output_dir.iterdir():
+            if file.is_file() and file.suffix != ".zip":
+                zf.write(file, arcname=file.name)
+
+    return FileResponse(zip_path, filename=zip_path.name)
+```
+
+- [ ] **Step 2: 注册路由到 `app.py`**
+
+```python
+from coupangads.web.api import router as api_router
+
+app.include_router(api_router)
+```
+
+- [ ] **Step 3: 写测试 `tests/test_web_api.py`**
+
+```python
+"""Web API 单元测试。"""
+
+from fastapi.testclient import TestClient
+
+from coupangads.web.app import app
+
+client = TestClient(app)
+
+
+def test_upload_endpoint(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+    from coupangads.core import config
+    monkeypatch.setattr(config, "DEFAULT_INPUT_DIR", tmp_path)
+
+    response = client.post(
+        "/api/upload",
+        data={"product_name": "test-prod"},
+        files={"files": ("img.jpg", b"fake", "image/jpeg")},
+    )
+    assert response.status_code == 200
+    assert response.json()["file_count"] == 1
+```
+
+- [ ] **Step 4: 运行测试**
+
+Run: `pytest tests/test_web_api.py -v`
+Expected: 1 个测试通过。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add src/coupangads/web/api.py src/coupangads/web/app.py tests/test_web_api.py
+git commit -m "feat: Web API 路由（上传/生成/进度/结果/下载）"
+```
+
+---
+
+### Task 15: 前端主题系统
+
+**Files:**
+- Create: `src/coupangads/web/static/css/base.css`
+- Create: `src/coupangads/web/static/css/themes/korean-minimal.css`
+- Create: `src/coupangads/web/static/css/themes/editorial.css`
+- Create: `src/coupangads/web/static/css/themes/warm-healing.css`
+- Create: `src/coupangads/web/static/css/themes/dark-industrial.css`
+- Create: `src/coupangads/web/static/css/themes/retro-film.css`
+- Create: `src/coupangads/web/static/css/themes/cyber-neon.css`
+- Create: `src/coupangads/web/static/js/theme.js`
+- Modify: `src/coupangads/web/templates/index.html`
+
+- [ ] **Step 1: 实现 `base.css`**
+
+```css
+:root {
+  --transition: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  transition: background var(--transition), color var(--transition);
+}
+
+.container { max-width: 960px; margin: 0 auto; padding: 2rem; }
+```
+
+- [ ] **Step 2: 实现 6 个主题 CSS（以 korean-minimal 为例）**
+
+```css
+:root[data-theme="korean-minimal"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #fafafa;
+  --bg-tertiary: #f5f5f5;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --accent: #111111;
+  --accent-secondary: #4ade80;
+  --border: #e5e5e5;
+  --font-display: 'Noto Serif KR', serif;
+  --font-body: 'Noto Sans KR', sans-serif;
+  --radius: 12px;
+}
+```
+
+其他 5 个主题按前端设计文档中的变量表实现。
+
+- [ ] **Step 3: 实现 `theme.js`**
+
+```javascript
+const THEME_KEY = 'coupangads-theme';
+const THEMES = [
+  'korean-minimal',
+  'editorial',
+  'warm-healing',
+  'dark-industrial',
+  'retro-film',
+  'cyber-neon',
+];
+
+export function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY) || 'korean-minimal';
+  setTheme(saved);
+  populateThemeSelector();
+}
+
+export function setTheme(theme) {
+  if (!THEMES.includes(theme)) return;
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem(THEME_KEY, theme);
+}
+
+function populateThemeSelector() {
+  const select = document.getElementById('theme-select');
+  if (!select) return;
+  select.innerHTML = THEMES.map(t =>
+    `<option value="${t}">${themeLabel(t)}</option>`
+  ).join('');
+  select.value = document.documentElement.getAttribute('data-theme');
+  select.addEventListener('change', (e) => setTheme(e.target.value));
+}
+
+function themeLabel(id) {
+  const labels = {
+    'korean-minimal': '韩系极简高级',
+    'editorial': '编辑杂志风',
+    'warm-healing': '温暖治愈风',
+    'dark-industrial': '暗色工业风',
+    'retro-film': '复古胶片风',
+    'cyber-neon': '赛博荧光风',
+  };
+  return labels[id] || id;
+}
+```
+
+- [ ] **Step 4: 更新 `index.html` 引入主题**
+
+```html
+<head>
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/themes/korean-minimal.css">
+  <link rel="stylesheet" href="/static/css/themes/editorial.css">
+  <!-- 其他主题 -->
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>CoupangAds</h1>
+      <select id="theme-select"></select>
+    </header>
+  </div>
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+```
+
+- [ ] **Step 5: 创建 `main.js`**
+
+```javascript
+import { initTheme } from './theme.js';
+
+document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
+});
+```
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add src/coupangads/web/static/
+git commit -m "feat: 6 主题切换系统与基础样式"
+```
+
+---
+
+### Task 16: 上传组件
+
+**Files:**
+- Create: `src/coupangads/web/static/css/components.css`
+- Create: `src/coupangads/web/static/js/upload.js`
+- Modify: `src/coupangads/web/templates/index.html`
+
+- [ ] **Step 1: 实现 `components.css` 上传区样式**
+
+```css
+.upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 4rem 2rem;
+  text-align: center;
+  background: var(--bg-tertiary);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.upload-zone.dragover {
+  border-color: var(--accent);
+  transform: scale(1.01);
+}
+
+.thumbnail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.thumbnail {
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+```
+
+- [ ] **Step 2: 实现 `upload.js`**
+
+```javascript
+export function initUpload() {
+  const zone = document.getElementById('upload-zone');
+  const input = document.getElementById('file-input');
+  const grid = document.getElementById('thumbnail-grid');
+  let files = [];
+
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', (e) => handleFiles(e.target.files));
+
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    handleFiles(e.dataTransfer.files);
+  });
+
+  function handleFiles(fileList) {
+    files = [...files, ...Array.from(fileList)];
+    renderThumbnails();
+  }
+
+  function renderThumbnails() {
+    grid.innerHTML = files.map((file, idx) => `
+      <div class="thumb-wrapper">
+        <img src="${URL.createObjectURL(file)}" class="thumbnail" alt="${file.name}">
+        <button data-idx="${idx}" class="remove-btn">×</button>
+      </div>
+    `).join('');
+  }
+}
+```
+
+- [ ] **Step 3: 更新 `index.html` 上传态**
+
+在 `.container` 内添加：
+
+```html
+<div id="upload-state">
+  <div class="upload-zone" id="upload-zone">
+    <div class="upload-icon">📁</div>
+    <h2>拖拽产品图到这里</h2>
+    <p class="subtitle">支持 JPG / PNG / HEIC / WEBP，建议 3-10 张</p>
+    <input type="file" id="file-input" multiple accept="image/*" hidden>
+  </div>
+  <div class="thumbnail-grid" id="thumbnail-grid"></div>
+  <button id="start-btn" class="primary-button">开始生成</button>
+</div>
+```
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add src/coupangads/web/static/css/components.css src/coupangads/web/static/js/upload.js src/coupangads/web/templates/index.html
+git commit -m "feat: 拖拽上传组件与缩略图预览"
+```
+
+---
+
+### Task 17: 进度面板与 SSE
+
+**Files:**
+- Create: `src/coupangads/web/static/js/progress.js`
+- Modify: `src/coupangads/web/static/css/components.css`
+- Modify: `src/coupangads/web/templates/index.html`
+
+- [ ] **Step 1: 实现 `progress.js`**
+
+```javascript
+export function startProgress(productId) {
+  showState('progress-state');
+  const evtSource = new EventSource(`/api/progress/${productId}`);
+
+  evtSource.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    updateProgress(data);
+    if (data.status === 'completed' || data.status === 'error') {
+      evtSource.close();
+      if (data.status === 'completed') {
+        import('./gallery.js').then(m => m.loadResult(productId));
+      }
+    }
+  };
+
+  evtSource.onerror = () => evtSource.close();
+}
+
+function updateProgress(data) {
+  const bar = document.getElementById('progress-bar');
+  const percent = document.getElementById('progress-percent');
+  if (bar) bar.style.width = `${data.progress}%`;
+  if (percent) percent.textContent = `${data.progress}%`;
+}
+
+function showState(id) {
+  document.querySelectorAll('.state').forEach(el => el.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+}
+```
+
+- [ ] **Step 2: 添加进度样式**
+
+```css
+.progress-bar-track {
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-secondary));
+  transition: width 0.3s ease;
+}
+
+.hidden { display: none !important; }
+```
+
+- [ ] **Step 3: 更新 `index.html` 生成态**
+
+```html
+<div id="progress-state" class="state hidden">
+  <div class="progress-bar-track">
+    <div class="progress-bar-fill" id="progress-bar"></div>
+  </div>
+  <div id="progress-percent">0%</div>
+  <div class="steps" id="steps"></div>
+  <div class="image-grid" id="image-grid"></div>
+</div>
+```
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add src/coupangads/web/static/js/progress.js src/coupangads/web/static/css/components.css src/coupangads/web/templates/index.html
+git commit -m "feat: SSE 实时进度面板与图片生成网格"
+```
+
+---
+
+### Task 18: 结果画廊与下载
+
+**Files:**
+- Create: `src/coupangads/web/static/js/gallery.js`
+- Modify: `src/coupangads/web/static/css/components.css`
+- Modify: `src/coupangads/web/templates/index.html`
+
+- [ ] **Step 1: 实现 `gallery.js`**
+
+```javascript
+export async function loadResult(productId) {
+  showState('result-state');
+  const res = await fetch(`/api/result/${productId}`);
+  const data = await res.json();
+
+  renderTextCards(data.text_files, productId);
+  renderImageGallery(data.images, productId);
+  setupDownload(productId);
+}
+
+function renderTextCards(files, productId) {
+  const container = document.getElementById('text-cards');
+  container.innerHTML = files.map(name => `
+    <div class="card">
+      <h3>${name}</h3>
+      <a href="/result/${productId}/${name}" target="_blank">查看</a>
+    </div>
+  `).join('');
+}
+
+function renderImageGallery(images, productId) {
+  const container = document.getElementById('image-gallery');
+  container.innerHTML = images.map(name => `
+    <div class="result-image-card">
+      <img src="/result/${productId}/${name}" alt="${name}">
+      <span>${name}</span>
+    </div>
+  `).join('');
+}
+
+function setupDownload(productId) {
+  const btn = document.getElementById('download-btn');
+  btn.href = `/api/download/${productId}`;
+}
+
+function showState(id) {
+  document.querySelectorAll('.state').forEach(el => el.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+}
+```
+
+> 注：图片和文案的静态文件服务需额外配置，或使用 `/api/result/file` 接口。
+
+- [ ] **Step 2: 更新 `index.html` 结果态**
+
+```html
+<div id="result-state" class="state hidden">
+  <h2>生成结果</h2>
+  <div id="text-cards" class="text-cards"></div>
+  <div id="image-gallery" class="image-gallery"></div>
+  <a id="download-btn" class="primary-button" download>下载全部资产</a>
+</div>
+```
+
+- [ ] **Step 3: 提交**
+
+```bash
+git add src/coupangads/web/static/js/gallery.js src/coupangads/web/static/css/components.css src/coupangads/web/templates/index.html
+git commit -m "feat: 结果文案卡片、图片画廊与 ZIP 下载"
+```
+
+---
+
+### Task 19: Web UI 端到端冒烟测试
+
+**Files:**
+- Create: `tests/e2e/test_web_pipeline.py`
+
+- [ ] **Step 1: 实现测试**
+
+```python
+"""Web UI 端到端冒烟测试。"""
+
+from fastapi.testclient import TestClient
+
+from coupangads.web.app import app
+
+client = TestClient(app)
+
+
+def test_web_upload_and_result_api(tmp_path, monkeypatch) -> None:
+    from coupangads.core import config
+    monkeypatch.setattr(config, "DEFAULT_INPUT_DIR", tmp_path / "raw")
+    monkeypatch.setattr(config, "DEFAULT_OUTPUT_DIR", tmp_path / "result")
+
+    # 上传
+    upload = client.post(
+        "/api/upload",
+        data={"product_name": "web-test"},
+        files={"files": ("img.jpg", b"fake", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+
+    # 触发
+    gen = client.post("/api/generate/web-test")
+    assert gen.status_code == 200
+
+    # 结果（生成未真实运行，会 404；此测试验证接口连通性）
+    result = client.get("/api/result/web-test")
+    assert result.status_code in (200, 404)
+```
+
+- [ ] **Step 2: 运行测试**
+
+Run: `pytest tests/e2e/test_web_pipeline.py -v`
+Expected: 测试通过。
+
+- [ ] **Step 3: 提交**
+
+```bash
+git add tests/e2e/test_web_pipeline.py
+git commit -m "test: Web UI 端到端冒烟测试"
+```
+
+---
+
+### Task 20: 完整版 CLI 入口
 
 **Files:**
 - Create: `src/coupangads/cli/full_pipeline.py`
@@ -2008,7 +2723,7 @@ git commit -m "feat: 完整版 CLI 入口（Gemini/Doubao 双线路）"
 
 ---
 
-### Task 14: 经典版入口与备用线路入口
+### Task 21: 经典版入口与备用线路入口
 
 **Files:**
 - Create: `src/coupangads/cli/classic_pipeline.py`
@@ -2069,11 +2784,13 @@ git commit -m "feat: 经典版与 Doubao 备用线路入口"
 
 ---
 
-### Task 15: 端到端冒烟测试
+### Task 22: 端到端冒烟测试（CLI）
 
 **Files:**
 - Create: `tests/e2e/test_full_pipeline.py`
 - Create: `tests/e2e/__init__.py`
+
+> Web UI 端到端测试见 Task 19。本任务验证 CLI 完整链路。
 
 - [ ] **Step 1: 使用 Fake Adapter 跑通完整链路**
 
@@ -2163,7 +2880,7 @@ git commit -m "test: 完整链路端到端冒烟测试"
 
 ---
 
-### Task 16: 文档更新与 v1.0 验收
+### Task 23: 文档更新与 v1.0 验收
 
 **Files:**
 - Modify: `README.md`
@@ -2176,6 +2893,8 @@ git commit -m "test: 完整链路端到端冒烟测试"
 ```markdown
 ## 快速开始
 
+### Web UI（推荐）
+
 ```bash
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
@@ -2183,6 +2902,13 @@ pip install -e ".[dev]"
 
 echo "YOUR_GEMINI_API_KEY" > apikey.md
 
+python -m coupangads.web.app
+# 打开 http://localhost:8000
+```
+
+### CLI
+
+```bash
 python -m coupangads.cli.full_pipeline --limit-folder "产品文件夹名"
 ```
 ```
@@ -2192,7 +2918,7 @@ python -m coupangads.cli.full_pipeline --limit-folder "产品文件夹名"
 将 AGENTS.md 中类似「当前仓库仅有规划/设计文档，没有源代码」的表述更新为：
 
 ```markdown
-> **重要：v1.0 MVP 已实现。** 源码位于 `src/coupangads/`，入口为 `python -m coupangads.cli.full_pipeline`。
+> **重要：v1.0 MVP 已实现。** 源码位于 `src/coupangads/`，Web 入口为 `python -m coupangads.web.app`（访问 http://localhost:8000），CLI 入口为 `python -m coupangads.cli.full_pipeline`。
 ```
 
 - [ ] **Step 3: 运行全部测试**
@@ -2238,11 +2964,11 @@ git tag v1.0.0
 
 ## 4. 迭代三：v2.0 平台化（大纲）
 
-**目标：** 从单机 CLI 演进为可服务的 Web 平台 MVP。
+**目标：** 从本地单用户 Web UI 演进为可服务的多租户 Web 平台。
 
 | 任务 | 说明 | 关键文件/组件 |
 |------|------|--------------|
-| T3.1 | Web 上传界面 | Frontend: React/Vue |
+| T3.1 | 前端框架化重构 | React/Vue + 组件库 |
 | T3.2 | 任务队列（Celery + Redis） | `src/coupangads/worker/` |
 | T3.3 | 用户系统与多租户 | FastAPI + PostgreSQL |
 | T3.4 | 结果管理后台 | 历史记录、下载、重新生成 |
@@ -2284,7 +3010,9 @@ PostgreSQL + S3/MinIO
 | FR-007 图片提示词组装 | Task 10 `prompt_assembler.py` |
 | FR-008 详情页图片生成 | Task 11 `generator.py` |
 | 断点续跑 | Task 12 `pipeline.py` + Task 11 |
-| 双模型冗余 | Task 7/8 + Task 13 |
+| 双模型冗余 | Task 7/8 + Task 20 |
+| 本地 Web UI | Task 13~19 |
+| 主题切换 | Task 15 |
 | 模板外置 | Task 6 |
 | 中文注释 | 所有实现文件 |
 | 日志格式统一 | Task 2 |
