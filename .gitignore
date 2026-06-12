@@ -1,0 +1,31 @@
+# 虚拟环境
+venv/
+.env/
+
+# API 密钥
+apikey.md
+dbkey.md
+
+# 输入输出目录
+raw-material/
+result/
+输入目录/
+输出目录/
+
+# 日志
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# Brainstorming / visual companion outputs
+.superpowers/
