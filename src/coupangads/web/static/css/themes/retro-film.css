@@ -1,0 +1,13 @@
+:root[data-theme="retro-film"] {
+  --bg-primary: #f4efe6;
+  --bg-secondary: #e8e0d4;
+  --bg-tertiary: #ddd3c4;
+  --text-primary: #2c1810;
+  --text-secondary: #6b5b4f;
+  --accent: #8b2635;
+  --accent-secondary: #b8860b;
+  --border: #c4b8a8;
+  --font-display: 'Noto Serif KR', serif;
+  --font-body: 'Noto Sans KR', sans-serif;
+  --radius: 8px;
+}

@@ -1,0 +1,13 @@
+:root[data-theme="warm-healing"] {
+  --bg-primary: #faf7f2;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f0e9df;
+  --text-primary: #5c4a3d;
+  --text-secondary: #8b7355;
+  --accent: #c17817;
+  --accent-secondary: #8fb339;
+  --border: #e8dfd2;
+  --font-display: 'Noto Serif KR', serif;
+  --font-body: 'Noto Sans KR', sans-serif;
+  --radius: 20px;
+}

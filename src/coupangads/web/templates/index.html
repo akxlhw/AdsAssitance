@@ -4,10 +4,52 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CoupangAds</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@600;700&family=Playfair+Display:wght@700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/themes/korean-minimal.css">
+  <link rel="stylesheet" href="/static/css/themes/editorial.css">
+  <link rel="stylesheet" href="/static/css/themes/warm-healing.css">
+  <link rel="stylesheet" href="/static/css/themes/dark-industrial.css">
+  <link rel="stylesheet" href="/static/css/themes/retro-film.css">
+  <link rel="stylesheet" href="/static/css/themes/cyber-neon.css">
 </head>
 <body>
-  <h1>CoupangAds</h1>
-  <script src="/static/js/main.js"></script>
+  <div class="container">
+    <header>
+      <h1>CoupangAds</h1>
+      <div class="header-controls">
+        <select id="theme-select"></select>
+        <button id="config-btn" class="icon-button" title="API 配置">⚙️</button>
+      </div>
+    </header>
+  </div>
+
+  <div id="config-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2>API 配置</h2>
+      <form id="config-form">
+        <label>
+          Gemini API Key
+          <span id="gemini-status">未配置</span>
+          <input type="password" id="gemini-key" placeholder="留空表示不修改">
+        </label>
+        <label>
+          Doubao API Key
+          <span id="doubao-status">未配置</span>
+          <input type="password" id="doubao-key" placeholder="留空表示不修改">
+        </label>
+        <label>
+          默认线路
+          <select id="default-provider">
+            <option value="gemini">Gemini</option>
+            <option value="doubao">Doubao</option>
+          </select>
+        </label>
+        <button type="submit">保存</button>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="/static/js/main.js"></script>
 </body>
 </html>

@@ -1,0 +1,13 @@
+:root[data-theme="dark-industrial"] {
+  --bg-primary: #111827;
+  --bg-secondary: #1f2937;
+  --bg-tertiary: #374151;
+  --text-primary: #f9fafb;
+  --text-secondary: #9ca3af;
+  --accent: #22d3ee;
+  --accent-secondary: #34d399;
+  --border: #374151;
+  --font-display: 'Space Mono', monospace;
+  --font-body: 'Noto Sans KR', sans-serif;
+  --radius: 6px;
+}
