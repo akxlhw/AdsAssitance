@@ -4,12 +4,10 @@ from pathlib import Path
 
 from google import genai
 from google.genai import types
-from PIL import Image
 
 from coupangads.adapters.base import ImageAdapter, TextAdapter
 from coupangads.core import config
 from coupangads.core.models import ReferenceImage
-from coupangads.infra.image import load_image_rgb
 
 
 class GeminiClientAdapter(TextAdapter, ImageAdapter):
@@ -41,8 +39,7 @@ class GeminiClientAdapter(TextAdapter, ImageAdapter):
         contents: list[types.Content] = []
 
         for ref in references:
-            pil_img = load_image_rgb(ref.path)
-            contents.append(pil_img)
+            contents.append(ref.image)
 
         contents.append(prompt)
 

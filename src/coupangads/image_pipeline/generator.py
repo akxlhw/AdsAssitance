@@ -1,5 +1,6 @@
 """详情页图片生成服务。"""
 
+import time
 from pathlib import Path
 
 from coupangads.adapters.base import ImageAdapter
@@ -16,21 +17,22 @@ def generate_detail_images(
     output_dir: Path,
     max_images: int | None = None,
     start_from: str | None = None,
+    delay: float = 0.0,
 ) -> list[Path]:
     """
     逐张生成详情页图片。
 
-    - 支持 max_images 限制生成数量
+    - 支持 max_images 限制尝试生成数量
     - 支持 start_from 从指定键恢复（如 A_B4）
     - 单张失败记录并继续
     """
     generated: list[Path] = []
     started = start_from is None
+    attempted = 0
+
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     for idx, prompt in enumerate(prompts):
-        if max_images is not None and len(generated) >= max_images:
-            break
-
         if not started:
             if prompt.filename == start_from or f"{prompt.style}_{prompt.block}" == start_from:
                 started = True
@@ -38,6 +40,10 @@ def generate_detail_images(
                 logger.info(f"跳过 {prompt.filename}，等待恢复点 {start_from}")
                 continue
 
+        if max_images is not None and attempted >= max_images:
+            break
+
+        attempted += 1
         output_path = output_dir / prompt.filename
         logger.info(f"生成图片 {idx + 1}/{len(prompts)}: {prompt.filename}")
 
@@ -54,5 +60,11 @@ def generate_detail_images(
                 logger.error(f"生成失败（无输出）: {prompt.filename}")
         except Exception as exc:
             logger.error(f"生成异常 {prompt.filename}: {exc}")
+
+        if delay > 0:
+            time.sleep(delay)
+
+    if start_from is not None and not started:
+        logger.warning(f"未找到恢复点 {start_from}，没有生成任何图片")
 
     return generated
