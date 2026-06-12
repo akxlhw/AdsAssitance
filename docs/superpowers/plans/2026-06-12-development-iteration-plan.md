@@ -78,6 +78,7 @@ CoupangAds/
 │       │   │   └── js/
 │       │   │       ├── main.js
 │       │   │       ├── theme.js
+│       │   │       ├── config.js
 │       │   │       ├── upload.js
 │       │   │       ├── progress.js
 │       │   │       └── gallery.js
@@ -2102,6 +2103,34 @@ async def download_product(product_id: str):
                 zf.write(file, arcname=file.name)
 
     return FileResponse(zip_path, filename=zip_path.name)
+
+
+@router.get("/config")
+async def get_config():
+    """获取 API 配置状态（不返回完整密钥）。"""
+    gemini_path = config.GEMINI_API_KEY_FILE
+    doubao_path = config.DOUBAO_API_KEY_FILE
+    return {
+        "gemini_configured": gemini_path.exists() and gemini_path.read_text().strip() != "",
+        "doubao_configured": doubao_path.exists() and doubao_path.read_text().strip() != "",
+        "default_provider": "gemini",
+    }
+
+
+@router.post("/config")
+async def update_config(payload: dict):
+    """更新 API 密钥与默认线路。"""
+    gemini_key = payload.get("gemini_api_key", "").strip()
+    doubao_key = payload.get("doubao_api_key", "").strip()
+
+    if gemini_key:
+        from coupangads.infra.io import write_text_file
+        write_text_file(config.GEMINI_API_KEY_FILE, gemini_key + "\n")
+    if doubao_key:
+        from coupangads.infra.io import write_text_file
+        write_text_file(config.DOUBAO_API_KEY_FILE, doubao_key + "\n")
+
+    return {"status": "saved"}
 ```
 
 - [ ] **Step 2: 注册路由到 `app.py`**
@@ -2136,6 +2165,22 @@ def test_upload_endpoint(tmp_path, monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert response.json()["file_count"] == 1
+
+
+def test_config_endpoint(tmp_path, monkeypatch) -> None:
+    from coupangads.core import config
+    monkeypatch.setattr(config, "GEMINI_API_KEY_FILE", tmp_path / "apikey.md")
+    monkeypatch.setattr(config, "DOUBAO_API_KEY_FILE", tmp_path / "dbkey.md")
+
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    assert response.json()["gemini_configured"] is False
+
+    response = client.post("/api/config", json={"gemini_api_key": "test-key"})
+    assert response.status_code == 200
+
+    response = client.get("/api/config")
+    assert response.json()["gemini_configured"] is True
 ```
 
 - [ ] **Step 4: 运行测试**
@@ -2152,7 +2197,7 @@ git commit -m "feat: Web API 路由（上传/生成/进度/结果/下载）"
 
 ---
 
-### Task 15: 前端主题系统
+### Task 15: 前端主题系统与 API 配置面板
 
 **Files:**
 - Create: `src/coupangads/web/static/css/base.css`
@@ -2163,6 +2208,7 @@ git commit -m "feat: Web API 路由（上传/生成/进度/结果/下载）"
 - Create: `src/coupangads/web/static/css/themes/retro-film.css`
 - Create: `src/coupangads/web/static/css/themes/cyber-neon.css`
 - Create: `src/coupangads/web/static/js/theme.js`
+- Create: `src/coupangads/web/static/js/config.js`
 - Modify: `src/coupangads/web/templates/index.html`
 
 - [ ] **Step 1: 实现 `base.css`**
@@ -2277,17 +2323,105 @@ function themeLabel(id) {
 
 ```javascript
 import { initTheme } from './theme.js';
+import { initConfigPanel } from './config.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
+  initConfigPanel();
 });
 ```
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 6: 实现 `config.js`**
+
+```javascript
+export async function initConfigPanel() {
+  const btn = document.getElementById('config-btn');
+  const modal = document.getElementById('config-modal');
+  const form = document.getElementById('config-form');
+  if (!btn || !modal || !form) return;
+
+  // 加载当前配置状态
+  const statusRes = await fetch('/api/config');
+  const status = await statusRes.json();
+  document.getElementById('gemini-status').textContent =
+    status.gemini_configured ? '已配置' : '未配置';
+  document.getElementById('doubao-status').textContent =
+    status.doubao_configured ? '已配置' : '未配置';
+  document.getElementById('default-provider').value = status.default_provider;
+
+  btn.addEventListener('click', () => modal.classList.remove('hidden'));
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.add('hidden');
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const geminiKey = document.getElementById('gemini-key').value;
+    const doubaoKey = document.getElementById('doubao-key').value;
+    const provider = document.getElementById('default-provider').value;
+
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gemini_api_key: geminiKey,
+        doubao_api_key: doubaoKey,
+        default_provider: provider,
+      }),
+    });
+
+    modal.classList.add('hidden');
+    // 刷新状态
+    initConfigPanel();
+  });
+}
+```
+
+- [ ] **Step 7: 更新 `index.html` 加入配置入口**
+
+在 header 中加入设置按钮和模态框：
+
+```html
+<header>
+  <h1>CoupangAds</h1>
+  <div class="header-controls">
+    <select id="theme-select"></select>
+    <button id="config-btn" class="icon-button" title="API 配置">⚙️</button>
+  </div>
+</header>
+
+<div id="config-modal" class="modal hidden">
+  <div class="modal-content">
+    <h2>API 配置</h2>
+    <form id="config-form">
+      <label>
+        Gemini API Key
+        <span id="gemini-status">未配置</span>
+        <input type="password" id="gemini-key" placeholder="留空表示不修改">
+      </label>
+      <label>
+        Doubao API Key
+        <span id="doubao-status">未配置</span>
+        <input type="password" id="doubao-key" placeholder="留空表示不修改">
+      </label>
+      <label>
+        默认线路
+        <select id="default-provider">
+          <option value="gemini">Gemini</option>
+          <option value="doubao">Doubao</option>
+        </select>
+      </label>
+      <button type="submit">保存</button>
+    </form>
+  </div>
+</div>
+```
+
+- [ ] **Step 8: 提交**
 
 ```bash
 git add src/coupangads/web/static/
-git commit -m "feat: 6 主题切换系统与基础样式"
+git commit -m "feat: 6 主题切换系统与 API 配置面板"
 ```
 
 ---
@@ -3013,6 +3147,7 @@ PostgreSQL + S3/MinIO
 | 双模型冗余 | Task 7/8 + Task 20 |
 | 本地 Web UI | Task 13~19 |
 | 主题切换 | Task 15 |
+| API 配置面板 | Task 14（后端）+ Task 15（前端） |
 | 模板外置 | Task 6 |
 | 中文注释 | 所有实现文件 |
 | 日志格式统一 | Task 2 |

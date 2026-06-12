@@ -29,6 +29,7 @@
 | 后端框架 | FastAPI | Python 原生、异步、API 文档自动生成 |
 | 前端技术 | 纯 HTML + CSS + JS | 无构建步骤，与 CSS 变量主题系统天然契合 |
 | 实时进度 | Server-Sent Events (SSE) | 单向推送足够，复杂度低于 WebSocket |
+| API 配置 | 本地文件 + Web UI 设置面板 | 密钥不落浏览器存储，后端写入 apikey.md / dbkey.md |
 | CLI 入口 | 保留 | 与 Web UI 共用底层生成链路 |
 
 ---
@@ -77,6 +78,7 @@
 ┌─────────────────────────────────────────┐
 │         FastAPI 后端（Python）           │
 │  ├─ /api/upload       上传产品图         │
+│  ├─ /api/config       读取/更新 API 配置 │
 │  ├─ /api/generate     触发生成           │
 │  ├─ /api/progress     SSE 实时进度       │
 │  ├─ /api/result       结果文件列表       │
@@ -248,6 +250,19 @@
 - 标题栏固定，内容区 Markdown 渲染。
 - 右上角「复制」按钮。
 
+### 7.6 API 配置面板
+
+- **入口**：右上角设置图标 ⚙️，点击打开模态框。
+- **内容**：
+  - Gemini API Key 输入框
+  - Doubao API Key 输入框
+  - 默认模型线路选择（Gemini / Doubao）
+- **安全约束**：
+  - 密钥输入框默认显示为掩码（`••••••`）。
+  - 密钥通过后端写入 `apikey.md` / `dbkey.md`，**不存储在浏览器 localStorage**。
+  - 前端仅显示「已配置 / 未配置」状态。
+- **校验**：保存时后端尝试读取文件首行非空内容，空值报错。
+
 ---
 
 ## 8. 动效规范
@@ -362,6 +377,46 @@ GET /api/download/{product_id}
 
 响应：ZIP 文件流。
 
+### 9.6 API 配置
+
+```http
+GET /api/config
+```
+
+响应（掩码处理，不返回完整密钥）：
+
+```json
+{
+  "gemini_configured": true,
+  "doubao_configured": false,
+  "default_provider": "gemini"
+}
+```
+
+```http
+POST /api/config
+Content-Type: application/json
+
+{
+  "gemini_api_key": "...",
+  "doubao_api_key": "...",
+  "default_provider": "gemini"
+}
+```
+
+响应：
+
+```json
+{
+  "status": "saved"
+}
+```
+
+**安全说明**：
+- POST 请求中的密钥由后端写入 `apikey.md` / `dbkey.md`。
+- 如果传入空字符串，表示不修改该密钥。
+- 返回给前端的状态仅用于显示「已配置 / 未配置」。
+
 ---
 
 ## 10. 文件结构
@@ -390,6 +445,7 @@ src/coupangads/
 │   │   └── js/
 │   │       ├── main.js
 │   │       ├── theme.js
+│   │       ├── config.js
 │   │       ├── upload.js
 │   │       ├── progress.js
 │   │       └── gallery.js
