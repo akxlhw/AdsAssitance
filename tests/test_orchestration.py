@@ -81,6 +81,17 @@ class FakeImageAdapter:
         return True
 
 
+class CountingImageAdapter:
+    def __init__(self):
+        self.calls = 0
+
+    def generate_image(self, prompt, references, output_path: Path) -> bool:
+        self.calls += 1
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"PNG")
+        return True
+
+
 def test_pipeline_creates_text_outputs(tmp_path: Path) -> None:
     input_dir, output_dir, templates_dir = _setup_product(tmp_path)
 
@@ -170,3 +181,51 @@ def test_pipeline_overwrite_regenerates_downstream(tmp_path: Path) -> None:
 
     assert adapter.call_count > first_run_calls
     assert report_path.read_text() != "modified report"
+
+
+def test_pipeline_reuses_existing_images(tmp_path: Path) -> None:
+    input_dir, output_dir, templates_dir = _setup_product(tmp_path)
+
+    image_adapter = CountingImageAdapter()
+    pipeline = ProductPipeline(
+        text_adapter=FakeTextAdapter(),
+        image_adapter=image_adapter,
+        templates=TemplateLoader(templates_dir),
+    )
+    pipeline.run(input_dir, output_dir)
+    first_run_calls = image_adapter.calls
+    assert first_run_calls > 0
+
+    # 第二次运行：图片已存在，不应再调用图片生成
+    pipeline2 = ProductPipeline(
+        text_adapter=FakeTextAdapter(),
+        image_adapter=image_adapter,
+        templates=TemplateLoader(templates_dir),
+    )
+    pipeline2.run(input_dir, output_dir)
+
+    assert image_adapter.calls == first_run_calls
+
+
+def test_pipeline_overwrite_regenerates_images(tmp_path: Path) -> None:
+    input_dir, output_dir, templates_dir = _setup_product(tmp_path)
+
+    image_adapter = CountingImageAdapter()
+    pipeline = ProductPipeline(
+        text_adapter=FakeTextAdapter(),
+        image_adapter=image_adapter,
+        templates=TemplateLoader(templates_dir),
+    )
+    pipeline.run(input_dir, output_dir)
+    first_run_calls = image_adapter.calls
+    assert first_run_calls == 18
+
+    pipeline2 = ProductPipeline(
+        text_adapter=FakeTextAdapter(),
+        image_adapter=image_adapter,
+        templates=TemplateLoader(templates_dir),
+        overwrite=True,
+    )
+    pipeline2.run(input_dir, output_dir)
+
+    assert image_adapter.calls - first_run_calls == 18

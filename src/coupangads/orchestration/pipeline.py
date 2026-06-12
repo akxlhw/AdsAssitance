@@ -171,18 +171,16 @@ class ProductPipeline:
         )
 
         # 9. 图片生成
-        if self.start_from is None:
-            prompts_to_run = [
-                p
-                for p in prompts
-                if self._needs_run(
-                    product_output_dir / p.filename, prompts_path, context_path
-                )
-            ]
-        else:
+        if self.overwrite or self.start_from:
             prompts_to_run = prompts
+        else:
+            prompts_to_run = [
+                p for p in prompts
+                if not (product_output_dir / p.filename).exists()
+            ]
 
         if prompts_to_run:
+            logger.info(f"将生成 {len(prompts_to_run)} 张图片")
             generate_detail_images(
                 self.image_adapter,
                 prompts_to_run,
@@ -192,6 +190,6 @@ class ProductPipeline:
                 start_from=self.start_from,
             )
         else:
-            logger.info("所有图片已存在且上游未变更，跳过图片生成")
+            logger.info("所有图片已存在，跳过图片生成")
 
         logger.info(f"{product_input_dir.name} 处理完成")
