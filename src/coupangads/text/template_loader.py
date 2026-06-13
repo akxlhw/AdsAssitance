@@ -96,12 +96,15 @@ class TemplateLoader:
 
     def load(self, name: str) -> str:
         """加载指定模板文件；若存在覆盖层则优先返回覆盖内容。"""
-        if name in self._overrides:
-            return self._overrides[name]
+        with self._lock:
+            override = self._overrides.get(name)
+        if override is not None:
+            return override
         return read_text_file(self.templates_dir / name)
 
     def is_overridden(self, name: str) -> bool:
-        return name in self._overrides
+        with self._lock:
+            return name in self._overrides
 
     def save_override(self, name: str, content: str) -> None:
         """保存用户自定义模板到覆盖层。"""

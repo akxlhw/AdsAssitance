@@ -94,6 +94,18 @@ class PromptService:
             )
         return result
 
+    def get_prompt_meta(self, name: str) -> PromptMeta:
+        """返回指定 Prompt 的元信息；未知 Prompt 会抛出 KeyError。"""
+        canonical = self._resolve_name(name)
+        meta = PROMPT_REGISTRY[canonical]
+        return PromptMeta(
+            name=canonical,
+            label=meta["label"],
+            description=meta["description"],
+            variables=list(meta["variables"]),
+            is_overridden=self._loader.is_overridden(canonical),
+        )
+
     def get_prompt(self, name: str) -> str:
         """加载指定 Prompt 的模板内容；存在覆盖层时优先返回覆盖内容。"""
         canonical = self._resolve_name(name)

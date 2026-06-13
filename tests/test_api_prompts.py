@@ -87,4 +87,24 @@ def test_get_prompt_missing_template_file() -> None:
     """已注册但默认模板文件缺失时返回 404。"""
     response = client.get("/api/prompts/product_title.txt")
     assert response.status_code == 404
-    assert "Template file not found" in response.json()["detail"]
+    assert "模板文件不存在" in response.json()["detail"]
+
+
+def test_update_prompt_persistence_failure(monkeypatch) -> None:
+    """覆盖层持久化失败时返回 500。"""
+    loader = api.get_prompt_service()._loader
+    original_persist = loader._persist_overrides
+
+    def _raise_oserror() -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(loader, "_persist_overrides", _raise_oserror)
+    try:
+        response = client.put(
+            "/api/prompts/product_report.txt",
+            json={"content": "custom prompt"},
+        )
+        assert response.status_code == 500
+        assert "持久化 Prompt 覆盖失败" in response.json()["detail"]
+    finally:
+        monkeypatch.setattr(loader, "_persist_overrides", original_persist)

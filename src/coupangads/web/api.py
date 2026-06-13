@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from coupangads.adapters.doubao import DoubaoClientAdapter
 from coupangads.adapters.gemini import GeminiClientAdapter
@@ -44,7 +44,7 @@ class GenerationAborted(Exception):
 class PromptUpdateRequest(BaseModel):
     """Prompt 更新请求体。"""
 
-    content: str
+    content: str = Field(..., max_length=1_000_000)
 
 
 # 内存中的任务状态（MVP 简版，v2.0 迁移到数据库）
@@ -501,14 +501,21 @@ async def get_prompt(name: str):
     service = get_prompt_service()
     try:
         content = service.get_prompt(name)
-        is_overridden = service.is_overridden(name)
+        meta = service.get_prompt_meta(name)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Prompt not found: {name}")
+        raise HTTPException(status_code=404, detail=f"未找到 Prompt: {name}")
     except FileNotFoundError:
         raise HTTPException(
-            status_code=404, detail=f"Template file not found: {name}"
+            status_code=404, detail=f"模板文件不存在: {name}"
         )
-    return {"name": name, "content": content, "is_overridden": is_overridden}
+    return {
+        "name": meta.name,
+        "content": content,
+        "is_overridden": meta.is_overridden,
+        "label": meta.label,
+        "description": meta.description,
+        "variables": meta.variables,
+    }
 
 
 @router.put("/prompts/{name}")
@@ -518,13 +525,13 @@ async def update_prompt(name: str, payload: PromptUpdateRequest):
     try:
         service.update_prompt(name, payload.content)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Prompt not found: {name}")
+        raise HTTPException(status_code=404, detail=f"未找到 Prompt: {name}")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OSError as exc:
         logger = get_logger("api.prompts")
-        logger.error(f"持久化 prompt 覆盖失败: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to persist prompt override")
+        logger.error(f"持久化 Prompt 覆盖失败: {exc}")
+        raise HTTPException(status_code=500, detail="持久化 Prompt 覆盖失败")
     return {"status": "saved", "name": name}
 
 
@@ -535,9 +542,9 @@ async def reset_prompt(name: str):
     try:
         service.reset_prompt(name)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Prompt not found: {name}")
+        raise HTTPException(status_code=404, detail=f"未找到 Prompt: {name}")
     except OSError as exc:
         logger = get_logger("api.prompts")
-        logger.error(f"持久化 prompt 覆盖失败: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to persist prompt override")
+        logger.error(f"删除/重置 Prompt 覆盖失败: {exc}")
+        raise HTTPException(status_code=500, detail="删除/重置 Prompt 覆盖失败")
     return {"status": "reset", "name": name}
