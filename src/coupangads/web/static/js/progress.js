@@ -65,7 +65,10 @@ export function startProgress(productId, selectedSteps) {
   initPreview();
 
   const previewBar = document.getElementById('progress-preview-bar');
-  if (previewBar) previewBar.innerHTML = '';
+  if (previewBar) {
+    previewBar.innerHTML = '';
+    enableDragScroll(previewBar);
+  }
 
   showState('progress-state');
   const steps = selectedSteps && selectedSteps.length
@@ -298,4 +301,53 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function enableDragScroll(container) {
+  let isDown = false;
+  let startX = 0;
+  let scrollLeft = 0;
+
+  container.addEventListener('mousedown', (e) => {
+    isDown = true;
+    container.classList.add('is-dragging');
+    startX = e.pageX - container.offsetLeft;
+    scrollLeft = container.scrollLeft;
+  });
+
+  container.addEventListener('mouseleave', () => {
+    isDown = false;
+    container.classList.remove('is-dragging');
+  });
+
+  container.addEventListener('mouseup', () => {
+    isDown = false;
+    container.classList.remove('is-dragging');
+  });
+
+  container.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    e.preventDefault();
+    const x = e.pageX - container.offsetLeft;
+    const walk = (x - startX) * 1.5;
+    container.scrollLeft = scrollLeft - walk;
+  });
+
+  // Touch support
+  container.addEventListener('touchstart', (e) => {
+    isDown = true;
+    startX = e.touches[0].pageX - container.offsetLeft;
+    scrollLeft = container.scrollLeft;
+  }, { passive: true });
+
+  container.addEventListener('touchend', () => {
+    isDown = false;
+  });
+
+  container.addEventListener('touchmove', (e) => {
+    if (!isDown) return;
+    const x = e.touches[0].pageX - container.offsetLeft;
+    const walk = (x - startX) * 1.5;
+    container.scrollLeft = scrollLeft - walk;
+  }, { passive: true });
 }

@@ -202,13 +202,20 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
   width: 100%;
-  max-width: 280px;
+  max-width: 360px;
   margin-top: 1.5rem;
   padding-bottom: 0.5rem;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .progress-preview-bar::-webkit-scrollbar {
   display: none;
+}
+
+.progress-preview-bar.is-dragging {
+  cursor: grabbing;
 }
 
 .progress-preview-card {
