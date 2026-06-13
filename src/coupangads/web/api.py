@@ -1,6 +1,7 @@
 """Web API 路由。"""
 
 import asyncio
+import functools
 import json
 import os
 import re
@@ -25,15 +26,14 @@ from coupangads.text.template_loader import TemplateLoader
 
 router = APIRouter(prefix="/api")
 
-_prompt_service: PromptService | None = None
-
-
+@functools.lru_cache(maxsize=1)
 def get_prompt_service() -> PromptService:
-    global _prompt_service
-    if _prompt_service is None:
-        templates = _load_templates()
-        _prompt_service = PromptService(templates)
-    return _prompt_service
+    """获取全局 PromptService 单例（线程安全，首次调用时初始化）。"""
+    templates = _load_templates()
+    if not templates.templates_dir.exists():
+        logger = get_logger("api.prompt_service")
+        logger.warning(f"模板目录不存在: {templates.templates_dir}")
+    return PromptService(templates)
 
 
 class GenerationAborted(Exception):
@@ -241,11 +241,18 @@ def _run_pipeline(product_id: str, enabled_steps: set[str] | None = None) -> Non
             }
         )
     except GenerationAborted:
+        text_files = [
+            p.name for p in output_dir.glob("*.md")
+            if p.name != config.RUN_LOG_FILE
+        ]
+        images = [p.name for p in output_dir.glob("*.png")]
         update_progress(
             {
                 "status": "aborted",
                 "progress": _task_states.get(product_id, {}).get("progress", 0),
                 "message": "已中止",
+                "text_files": sorted(text_files),
+                "images": sorted(images),
             }
         )
     except Exception as exc:
@@ -340,9 +347,16 @@ async def progress_stream(product_id: str):
     async def event_generator():
         while True:
             state = _task_states.get(product_id, {"progress": 0, "status": "unknown"})
-            yield f"data: {json.dumps(state)}\n\n"
             status = state.get("status")
             progress = state.get("progress", 0)
+
+            if status == "aborted":
+                # 发送命名事件，前端可通过 addEventListener('aborted') 捕获
+                yield f"event: aborted\ndata: {json.dumps(state)}\n\n"
+                break
+
+            yield f"data: {json.dumps(state)}\n\n"
+
             # 单个步骤完成时 status 也是 completed，必须等进度 100 才结束 SSE
             if status == "error" or (status == "completed" and progress == 100):
                 break
