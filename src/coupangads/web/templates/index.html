@@ -7,19 +7,22 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@600;700&family=Playfair+Display:wght@700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/themes/korean-minimal.css">
-  <link rel="stylesheet" href="/static/css/themes/editorial.css">
-  <link rel="stylesheet" href="/static/css/themes/warm-healing.css">
-  <link rel="stylesheet" href="/static/css/themes/dark-industrial.css">
-  <link rel="stylesheet" href="/static/css/themes/retro-film.css">
-  <link rel="stylesheet" href="/static/css/themes/cyber-neon.css">
   <link rel="stylesheet" href="/static/css/components.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
+  <div id="preview-modal" class="preview-modal hidden">
+    <div class="preview-backdrop"></div>
+    <div class="preview-content">
+      <button class="preview-close" id="preview-close">&times;</button>
+      <div id="preview-body"></div>
+    </div>
+  </div>
+
   <div class="container">
     <header>
       <h1>CoupangAds</h1>
       <div class="header-controls">
-        <select id="theme-select"></select>
         <button id="config-btn" class="icon-button" title="API 配置">⚙️</button>
       </div>
     </header>
@@ -36,23 +39,43 @@
         <input type="file" id="file-input" multiple accept="image/*" hidden>
       </div>
       <div class="thumbnail-grid" id="thumbnail-grid"></div>
+
+      <div class="step-options">
+        <div class="step-options-header">
+          <h3>生成选项</h3>
+          <button type="button" id="toggle-steps" class="link-button">取消全选</button>
+        </div>
+        <label class="step-option"><input type="checkbox" value="product_report" checked> 商品画像</label>
+        <label class="step-option"><input type="checkbox" value="title" checked> 标题</label>
+        <label class="step-option"><input type="checkbox" value="keywords" checked> 关键词</label>
+        <label class="step-option"><input type="checkbox" value="selling_points" checked> 卖点文案</label>
+        <label class="step-option"><input type="checkbox" value="instagram" checked> INS 文案</label>
+        <label class="step-option"><input type="checkbox" value="images" checked> 详情页图片</label>
+      </div>
+
       <button id="start-btn" class="primary-button">开始生成</button>
     </div>
 
     <div id="progress-state" class="state hidden">
-      <div class="progress-bar-track">
-        <div class="progress-bar-fill" id="progress-bar"></div>
+      <div class="progress-container">
+        <div class="progress-percentage" id="progress-percent">0%</div>
+        <div class="progress-message" id="progress-message">准备中...</div>
+        <div class="progress-bar-track progress-bar-track--minimal">
+          <div class="progress-bar-fill" id="progress-bar"></div>
+          <div class="progress-bar-shimmer" id="progress-bar-shimmer"></div>
+        </div>
+        <div class="progress-steps" id="steps"></div>
       </div>
-      <div id="progress-percent">0%</div>
-      <div class="steps" id="steps"></div>
-      <div class="image-grid" id="image-grid"></div>
     </div>
 
     <div id="result-state" class="state hidden">
       <h2>生成结果</h2>
       <div id="text-cards" class="text-cards"></div>
       <div id="image-gallery" class="image-gallery"></div>
-      <a id="download-btn" class="primary-button" download>下载全部资产</a>
+      <div class="result-actions">
+        <button id="refresh-result" class="secondary-button">刷新结果</button>
+        <a id="download-btn" class="primary-button" download>下载全部资产</a>
+      </div>
     </div>
   </div>
 
@@ -61,21 +84,40 @@
       <h2>API 配置</h2>
       <form id="config-form">
         <label>
+          Text Provider
+          <select id="text-provider">
+            <option value="gemini">Gemini</option>
+            <option value="doubao">Doubao</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="mock">Mock（离线开发）</option>
+          </select>
+        </label>
+        <label>
+          Image Provider
+          <select id="image-provider">
+            <option value="gemini">Gemini</option>
+            <option value="doubao">Doubao</option>
+            <option value="mock">Mock（离线开发）</option>
+          </select>
+        </label>
+        <label>
           Gemini API Key
           <span id="gemini-status">未配置</span>
-          <input type="password" id="gemini-key" placeholder="留空表示不修改">
+          <input type="password" id="gemini-key" placeholder="Leave blank to keep unchanged">
         </label>
         <label>
           Doubao API Key
           <span id="doubao-status">未配置</span>
-          <input type="password" id="doubao-key" placeholder="留空表示不修改">
+          <input type="password" id="doubao-key" placeholder="Leave blank to keep unchanged">
         </label>
         <label>
-          默认线路
-          <select id="default-provider">
-            <option value="gemini">Gemini</option>
-            <option value="doubao">Doubao</option>
-          </select>
+          DeepSeek API Key
+          <span id="deepseek-status">未配置</span>
+          <input type="password" id="deepseek-key" placeholder="Leave blank to keep unchanged">
+        </label>
+        <label>
+          DeepSeek Model
+          <input type="text" id="deepseek-model" value="deepseek-v4-pro">
         </label>
         <button type="submit">保存</button>
       </form>
