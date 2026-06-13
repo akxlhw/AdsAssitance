@@ -23,13 +23,23 @@
 
   <div class="container">
     <header>
-      <h1>CoupangAds</h1>
+      <a href="/" style="text-decoration: none; color: inherit;"><h1>CoupangAds</h1></a>
       <div class="header-controls">
         <button id="config-btn" class="icon-button" title="API 配置" aria-label="API 配置">⚙️</button>
+        <button id="prompt-studio-btn" class="btn-ghost" type="button">Prompt Studio</button>
+        <button id="header-create-btn" class="btn-primary" type="button">+ 新建商品</button>
       </div>
     </header>
 
-    <div id="upload-state" class="state">
+    <div id="home-view" class="home-view hidden">
+      <div class="home-header">
+        <h2 class="home-header__title">工作台</h2>
+      </div>
+      <div id="home-filters" class="home-filters"></div>
+      <div id="product-grid" class="product-grid"></div>
+    </div>
+
+    <div id="upload-state" class="state hidden">
       <label>
         产品名称
         <input type="text" id="product-name" placeholder="例如：dog-harness-001" value="">
