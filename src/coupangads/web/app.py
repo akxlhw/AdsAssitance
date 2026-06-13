@@ -26,6 +26,24 @@ def index(request: Request):
     return templates.TemplateResponse(request, "index.html")
 
 
+@app.get("/create")
+def create_page(request: Request):
+    """新建商品页：复用 SPA，由前端根据 URL 加载上传视图。"""
+    return templates.TemplateResponse(request, "index.html")
+
+
+@app.get("/progress/{product_id}")
+def progress_page(request: Request, product_id: str):
+    """进度页：复用 SPA，由前端根据 URL 加载进度视图。"""
+    return templates.TemplateResponse(request, "index.html")
+
+
+@app.get("/result/{product_id}")
+def result_page(request: Request, product_id: str):
+    """结果页：复用 SPA，由前端根据 URL 加载结果。"""
+    return templates.TemplateResponse(request, "index.html")
+
+
 if __name__ == "__main__":
     import uvicorn
 
