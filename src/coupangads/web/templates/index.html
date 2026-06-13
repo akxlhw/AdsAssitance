@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="/static/css/themes/dark-industrial.css">
   <link rel="stylesheet" href="/static/css/themes/retro-film.css">
   <link rel="stylesheet" href="/static/css/themes/cyber-neon.css">
+  <link rel="stylesheet" href="/static/css/components.css">
 </head>
 <body>
   <div class="container">
@@ -22,6 +23,33 @@
         <button id="config-btn" class="icon-button" title="API 配置">⚙️</button>
       </div>
     </header>
+
+    <div id="upload-state" class="state">
+      <div class="upload-zone" id="upload-zone">
+        <div class="upload-icon">📁</div>
+        <h2>拖拽产品图到这里</h2>
+        <p class="subtitle">支持 JPG / PNG / HEIC / WEBP，建议 3-10 张</p>
+        <input type="file" id="file-input" multiple accept="image/*" hidden>
+      </div>
+      <div class="thumbnail-grid" id="thumbnail-grid"></div>
+      <button id="start-btn" class="primary-button">开始生成</button>
+    </div>
+
+    <div id="progress-state" class="state hidden">
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progress-bar"></div>
+      </div>
+      <div id="progress-percent">0%</div>
+      <div class="steps" id="steps"></div>
+      <div class="image-grid" id="image-grid"></div>
+    </div>
+
+    <div id="result-state" class="state hidden">
+      <h2>生成结果</h2>
+      <div id="text-cards" class="text-cards"></div>
+      <div id="image-gallery" class="image-gallery"></div>
+      <a id="download-btn" class="primary-button" download>下载全部资产</a>
+    </div>
   </div>
 
   <div id="config-modal" class="modal hidden">

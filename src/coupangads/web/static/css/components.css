@@ -1,0 +1,68 @@
+.upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 4rem 2rem;
+  text-align: center;
+  background: var(--bg-tertiary);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.upload-zone.dragover {
+  border-color: var(--accent);
+  transform: scale(1.01);
+}
+
+.thumbnail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.thumbnail {
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.thumb-wrapper {
+  position: relative;
+}
+
+.remove-btn {
+  position: absolute;
+  top: -0.5rem;
+  right: -0.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: var(--bg-primary);
+  cursor: pointer;
+}
+
+.primary-button {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  background: var(--accent);
+  color: var(--bg-primary);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 600;
+  text-decoration: none;
+  margin-top: 1.5rem;
+}
+
+.primary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
