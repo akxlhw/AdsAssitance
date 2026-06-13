@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/themes/korean-minimal.css">
   <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/home.css">
+  <link rel="stylesheet" href="/static/css/prompt-studio.css">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
@@ -23,7 +25,7 @@
     <header>
       <h1>CoupangAds</h1>
       <div class="header-controls">
-        <button id="config-btn" class="icon-button" title="API 配置">⚙️</button>
+        <button id="config-btn" class="icon-button" title="API 配置" aria-label="API 配置">⚙️</button>
       </div>
     </header>
 
@@ -59,10 +61,18 @@
     <div id="progress-state" class="state hidden">
       <div class="progress-container">
         <div class="progress-percentage" id="progress-percent">0%</div>
-        <div class="progress-message" id="progress-message">准备中...</div>
+        <div class="progress-message" id="progress-message">
+          <span id="progress-message-text">准备中...</span>
+          <button id="abort-link" class="abort-link" type="button">中止</button>
+          <span id="abort-error" class="abort-error hidden"></span>
+        </div>
         <div class="progress-bar-track progress-bar-track--minimal">
           <div class="progress-bar-fill" id="progress-bar"></div>
           <div class="progress-bar-shimmer" id="progress-bar-shimmer"></div>
+        </div>
+        <div class="aborted-state hidden" id="aborted-state">
+          <p class="aborted-state__message">生成已中止</p>
+          <a id="view-results-btn" class="primary-button" href="#">查看已生成结果</a>
         </div>
         <div class="progress-preview-bar" id="progress-preview-bar"></div>
         <div class="progress-steps" id="steps"></div>
@@ -81,46 +91,87 @@
   </div>
 
   <div id="config-modal" class="modal hidden">
-    <div class="modal-content">
-      <h2>API 配置</h2>
+    <div class="modal-backdrop"></div>
+    <div class="modal-panel config-panel">
+      <div class="config-panel__header">
+        <h2>API 配置</h2>
+        <p class="config-panel__subtitle">选择模型提供商并填写密钥</p>
+      </div>
+
       <form id="config-form">
-        <label>
-          Text Provider
-          <select id="text-provider">
-            <option value="gemini">Gemini</option>
-            <option value="doubao">Doubao</option>
-            <option value="deepseek">DeepSeek</option>
-            <option value="mock">Mock（离线开发）</option>
-          </select>
-        </label>
-        <label>
-          Image Provider
-          <select id="image-provider">
-            <option value="gemini">Gemini</option>
-            <option value="doubao">Doubao</option>
-            <option value="mock">Mock（离线开发）</option>
-          </select>
-        </label>
-        <label>
-          Gemini API Key
-          <span id="gemini-status">未配置</span>
-          <input type="password" id="gemini-key" placeholder="Leave blank to keep unchanged">
-        </label>
-        <label>
-          Doubao API Key
-          <span id="doubao-status">未配置</span>
-          <input type="password" id="doubao-key" placeholder="Leave blank to keep unchanged">
-        </label>
-        <label>
-          DeepSeek API Key
-          <span id="deepseek-status">未配置</span>
-          <input type="password" id="deepseek-key" placeholder="Leave blank to keep unchanged">
-        </label>
-        <label>
-          DeepSeek Model
-          <input type="text" id="deepseek-model" value="deepseek-v4-pro">
-        </label>
-        <button type="submit">保存</button>
+        <!-- 文本生成 -->
+        <div class="config-card" data-config-group="text">
+          <h3 class="config-card__title">文本生成</h3>
+          <div class="segmented-control" role="group" aria-label="文本生成提供商">
+            <button type="button" class="segmented-control__btn is-active" data-provider="gemini" data-target="text" aria-pressed="true">Gemini</button>
+            <button type="button" class="segmented-control__btn" data-provider="deepseek" data-target="text" aria-pressed="false">DeepSeek</button>
+            <button type="button" class="segmented-control__btn" data-provider="mock" data-target="text" aria-pressed="false">Mock</button>
+          </div>
+
+          <div class="config-fields" data-fields-for="text-gemini">
+            <div class="config-field">
+              <div class="config-field__label-row">
+                <label for="gemini-key">Gemini API Key</label>
+                <span id="gemini-status" class="config-status config-status--unconfigured">未配置</span>
+              </div>
+              <input type="password" id="gemini-key" name="gemini_api_key" placeholder="输入 API Key">
+            </div>
+          </div>
+
+          <div class="config-fields hidden" data-fields-for="text-deepseek">
+            <div class="config-field">
+              <div class="config-field__label-row">
+                <label for="deepseek-key">DeepSeek API Key</label>
+                <span id="deepseek-status" class="config-status config-status--unconfigured">未配置</span>
+              </div>
+              <input type="password" id="deepseek-key" name="deepseek_api_key" placeholder="输入 API Key">
+            </div>
+            <div class="config-field">
+              <label for="deepseek-model">DeepSeek Model</label>
+              <input type="text" id="deepseek-model" name="deepseek_model" value="deepseek-v4-pro">
+            </div>
+          </div>
+
+          <div class="config-fields hidden" data-fields-for="text-mock">
+            <div class="config-mock-hint">Mock 模式：离线开发，不调用真实 API</div>
+          </div>
+        </div>
+
+        <!-- 图片生成 -->
+        <div class="config-card" data-config-group="image">
+          <h3 class="config-card__title">图片生成</h3>
+          <div class="segmented-control" role="group" aria-label="图片生成提供商">
+            <button type="button" class="segmented-control__btn is-active" data-provider="gemini" data-target="image" aria-pressed="true">Gemini</button>
+            <button type="button" class="segmented-control__btn" data-provider="doubao" data-target="image" aria-pressed="false">Doubao</button>
+            <button type="button" class="segmented-control__btn" data-provider="mock" data-target="image" aria-pressed="false">Mock</button>
+          </div>
+
+          <div class="config-fields" data-fields-for="image-gemini">
+            <div class="config-field">
+              <div class="config-field__label-row">
+                <label for="image-gemini-key">Gemini API Key</label>
+                <span id="gemini-status-image" class="config-status config-status--unconfigured">未配置</span>
+              </div>
+              <input type="password" id="image-gemini-key" name="image_gemini_api_key" placeholder="输入 API Key">
+            </div>
+          </div>
+
+          <div class="config-fields hidden" data-fields-for="image-doubao">
+            <div class="config-field">
+              <div class="config-field__label-row">
+                <label for="doubao-key">Doubao API Key</label>
+                <span id="doubao-status" class="config-status config-status--unconfigured">未配置</span>
+              </div>
+              <input type="password" id="doubao-key" name="doubao_api_key" placeholder="输入 API Key">
+            </div>
+          </div>
+
+          <div class="config-fields hidden" data-fields-for="image-mock">
+            <div class="config-mock-hint">Mock 模式：离线开发，不调用真实 API</div>
+          </div>
+        </div>
+
+        <button type="submit" class="config-submit">保存配置</button>
       </form>
     </div>
   </div>
