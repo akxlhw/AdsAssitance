@@ -1,8 +1,9 @@
 export async function initConfigPanel() {
-  const modal = document.getElementById('config-modal');
+  let modal = document.getElementById('config-modal');
   if (!modal) return;
   const cleanModal = modal.cloneNode(true);
   modal.parentNode.replaceChild(cleanModal, modal);
+  modal = cleanModal;  // 使用新的可见节点
 
   const btn = document.getElementById('config-btn');
   const form = document.getElementById('config-form');

@@ -18,8 +18,21 @@ _task_states: dict[str, dict] = {}
 
 
 def _safe_name(name: str) -> str:
-    """移除危险字符，仅保留字母、数字、下划线、连字符和点。"""
-    return re.sub(r"[^a-zA-Z0-9_\-\.]", "_", name)
+    """清理名称：只允许字母、数字、下划线、连字符。"""
+    # 将连续的点替换为单个下划线，防止 ".." 路径遍历
+    cleaned = re.sub(r"\.+", "_", name)
+    return re.sub(r"[^a-zA-Z0-9_\-]", "_", cleaned)
+
+
+def _resolve_under(base: Path, *parts: str) -> Path:
+    """解析路径，并确保结果在 base 目录下。"""
+    target = (base / _safe_name("/".join(parts))).resolve()
+    base_resolved = base.resolve()
+    try:
+        target.relative_to(base_resolved)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid path") from exc
+    return target
 
 
 @router.post("/upload")
@@ -29,14 +42,15 @@ async def upload_product(
 ):
     """上传产品图。"""
     safe_product = _safe_name(product_name)
-    product_dir = config.DEFAULT_INPUT_DIR / safe_product
+    product_dir = _resolve_under(config.DEFAULT_INPUT_DIR, safe_product)
     product_dir.mkdir(parents=True, exist_ok=True)
 
     saved = []
     for file in files:
         safe_filename = _safe_name(file.filename or "unnamed")
-        target = product_dir / safe_filename
+        target = _resolve_under(product_dir, safe_filename)
         content = await file.read()
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
         saved.append(safe_filename)
 
@@ -71,7 +85,7 @@ async def progress_stream(product_id: str):
 async def get_result(product_id: str):
     """获取结果文件列表。"""
     safe_id = _safe_name(product_id)
-    output_dir = config.DEFAULT_OUTPUT_DIR / safe_id
+    output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, safe_id)
     if not output_dir.exists():
         raise HTTPException(status_code=404, detail="Output not found")
 
@@ -84,7 +98,7 @@ async def get_result(product_id: str):
 async def download_product(product_id: str):
     """下载 ZIP 资产包。"""
     safe_id = _safe_name(product_id)
-    output_dir = config.DEFAULT_OUTPUT_DIR / safe_id
+    output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, safe_id)
     if not output_dir.exists():
         raise HTTPException(status_code=404, detail="Output not found")
 

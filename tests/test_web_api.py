@@ -21,6 +21,28 @@ def test_upload_endpoint(tmp_path, monkeypatch) -> None:
     assert response.json()["file_count"] == 1
 
 
+def test_upload_path_traversal_blocked(tmp_path, monkeypatch) -> None:
+    """确认 .. 与路径分隔符会被安全清理，无法逃离基础目录。"""
+    from coupangads.web.api import _safe_name
+    from coupangads.core import config
+    monkeypatch.setattr(config, "DEFAULT_INPUT_DIR", tmp_path)
+
+    response = client.post(
+        "/api/upload",
+        data={"product_name": ".."},
+        files={"files": ("../escape.txt", b"x", "text/plain")},
+    )
+    assert response.status_code == 200
+    assert response.json()["product_id"] == "_"
+
+    # 不应在 tmp_path 之外创建任何文件
+    assert not (tmp_path.parent / "escape.txt").exists()
+    # 文件应被写入安全化后的子目录
+    safe_filename = _safe_name("../escape.txt")
+    safe_file = tmp_path / "_" / safe_filename
+    assert safe_file.exists()
+
+
 def test_config_endpoint(tmp_path, monkeypatch) -> None:
     from coupangads.core import config
     monkeypatch.setattr(config, "GEMINI_API_KEY_FILE", tmp_path / "apikey.md")
