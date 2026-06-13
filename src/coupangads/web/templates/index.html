@@ -176,6 +176,33 @@
     </div>
   </div>
 
+  <div id="prompt-modal" class="prompt-modal">
+    <div class="prompt-backdrop"></div>
+    <div class="prompt-panel">
+      <div class="prompt-panel__header">
+        <h2 class="prompt-panel__title">⚙️ Prompt Studio</h2>
+        <button id="prompt-modal-close" class="prompt-panel__close" aria-label="关闭">&times;</button>
+      </div>
+      <div class="prompt-panel__body">
+        <nav id="prompt-menu" class="prompt-menu"></nav>
+        <div class="prompt-editor">
+          <div class="prompt-editor__meta">
+            <div id="prompt-editor-name" class="prompt-editor__name"></div>
+            <div id="prompt-editor-desc" class="prompt-editor__desc"></div>
+          </div>
+          <textarea id="prompt-editor-textarea" class="prompt-editor__textarea" spellcheck="false"></textarea>
+          <div id="prompt-editor-vars" class="prompt-editor__vars"></div>
+          <div class="prompt-editor__actions">
+            <button id="prompt-reset" class="btn-ghost" type="button">恢复默认</button>
+            <button id="prompt-cancel" class="btn-ghost" type="button">取消</button>
+            <button id="prompt-save" class="btn-primary" type="button">保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="prompt-toast" class="prompt-toast"></div>
+
   <script type="module" src="/static/js/main.js"></script>
 </body>
 </html>
