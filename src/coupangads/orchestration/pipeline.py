@@ -34,6 +34,7 @@ class ProductPipeline:
         overwrite: bool = False,
         max_images: int | None = None,
         start_from: str | None = None,
+        request_delay: float = 0.0,
     ) -> None:
         self.text_adapter = text_adapter
         self.image_adapter = image_adapter
@@ -41,6 +42,7 @@ class ProductPipeline:
         self.overwrite = overwrite
         self.max_images = max_images
         self.start_from = start_from
+        self.request_delay = request_delay
 
     def _needs_run(self, target: Path, *dependencies: Path) -> bool:
         """判断目标文件是否需要重新生成。"""
@@ -188,6 +190,7 @@ class ProductPipeline:
                 product_output_dir,
                 max_images=self.max_images,
                 start_from=self.start_from,
+                delay=self.request_delay,
             )
         else:
             logger.info("所有图片已存在，跳过图片生成")

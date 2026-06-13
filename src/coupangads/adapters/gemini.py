@@ -13,10 +13,12 @@ from coupangads.core.models import ReferenceImage
 class GeminiClientAdapter(TextAdapter, ImageAdapter):
     """Gemini 双线路适配器：文本用对话模式，图片用独立请求模式。"""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, max_retries: int = config.DEFAULT_MAX_RETRIES, request_timeout: int = config.DEFAULT_REQUEST_TIMEOUT_MS) -> None:
         self.client = genai.Client(api_key=api_key)
         self.model_text = config.GEMINI_TEXT_MODEL
         self.model_image = config.GEMINI_IMAGE_MODEL
+        self.max_retries = max_retries
+        self.request_timeout = request_timeout
         self._chat = None
 
     def _ensure_chat(self) -> None:

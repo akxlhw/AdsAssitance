@@ -55,12 +55,12 @@ def main() -> None:
 
     if args.use_doubao:
         api_key = read_api_key(args.doubao_key_file, env_var="DOUBAO_API_KEY")
-        text_adapter = DoubaoClientAdapter(api_key)
-        image_adapter = DoubaoClientAdapter(api_key)
+        text_adapter = DoubaoClientAdapter(api_key, max_retries=args.max_retries, request_timeout=args.request_timeout)
+        image_adapter = DoubaoClientAdapter(api_key, max_retries=args.max_retries, request_timeout=args.request_timeout)
     else:
         api_key = read_api_key(args.api_key_file, env_var="GEMINI_API_KEY")
-        text_adapter = GeminiClientAdapter(api_key)
-        image_adapter = GeminiClientAdapter(api_key)
+        text_adapter = GeminiClientAdapter(api_key, max_retries=args.max_retries, request_timeout=args.request_timeout)
+        image_adapter = GeminiClientAdapter(api_key, max_retries=args.max_retries, request_timeout=args.request_timeout)
 
     pipeline = ProductPipeline(
         text_adapter=text_adapter,
@@ -69,6 +69,7 @@ def main() -> None:
         overwrite=args.overwrite,
         max_images=args.max_images,
         start_from=args.start_from,
+        request_delay=args.request_delay,
     )
 
     product_dirs = [d for d in input_dir.iterdir() if d.is_dir()]

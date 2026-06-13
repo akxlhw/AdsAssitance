@@ -13,10 +13,12 @@ from coupangads.infra.image import image_to_data_url
 class DoubaoClientAdapter(TextAdapter, ImageAdapter):
     """Doubao 双线路适配器。"""
 
-    def __init__(self, api_key: str, base_url: str = "https://ark.cn-beijing.volces.com/api/v3") -> None:
+    def __init__(self, api_key: str, base_url: str = "https://ark.cn-beijing.volces.com/api/v3", max_retries: int = config.DEFAULT_MAX_RETRIES, request_timeout: int = config.DEFAULT_REQUEST_TIMEOUT_MS) -> None:
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model_text = config.DOUBAO_TEXT_MODEL
         self.model_image = config.DOUBAO_IMAGE_MODEL
+        self.max_retries = max_retries
+        self.request_timeout = request_timeout
         self._messages: list[dict] = []
 
     def chat(self, prompt: str) -> str:

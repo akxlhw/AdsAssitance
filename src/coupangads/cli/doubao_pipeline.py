@@ -1,7 +1,8 @@
 """备用线路入口：默认使用 Doubao 模型。"""
 
-from coupangads.cli.full_pipeline import main as full_main
 import sys
+
+from coupangads.cli.full_pipeline import main as full_main
 
 
 def main() -> None:

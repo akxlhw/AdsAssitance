@@ -76,5 +76,6 @@ def test_full_pipeline_end_to_end(tmp_path: Path) -> None:
     assert (output_dir / "product_context.md").exists()
     assert (output_dir / "image_prompts.json").exists()
     assert (output_dir / "best_reference_images.json").exists()
-    assert (output_dir / "A_B1.png").exists()
-    assert (output_dir / "B_B9.png").exists()
+    for style in ["A", "B"]:
+        for block in [f"B{i}" for i in range(1, 10)]:
+            assert (output_dir / f"{style}_{block}.png").exists()
