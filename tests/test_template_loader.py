@@ -63,6 +63,23 @@ def test_corrupt_override_file_is_backed_up_and_returns_defaults(tmp_path: Path)
     assert backups[0].read_text(encoding="utf-8") == "this is not json"
 
 
+def test_non_dict_override_file_is_backed_up_and_returns_defaults(tmp_path: Path) -> None:
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "product_report.txt").write_text("default prompt", encoding="utf-8")
+
+    overrides_path = tmp_path / "overrides.json"
+    overrides_path.write_text(json.dumps(["list", "not", "dict"], ensure_ascii=False), encoding="utf-8")
+
+    loader = TemplateLoader(templates_dir=templates_dir, overrides_path=overrides_path)
+    assert loader.load("product_report.txt") == "default prompt"
+    assert not overrides_path.exists()
+
+    backups = list(tmp_path.glob("overrides.json.bak.*"))
+    assert len(backups) == 1
+    assert json.loads(backups[0].read_text(encoding="utf-8")) == ["list", "not", "dict"]
+
+
 def test_is_overridden(tmp_path: Path) -> None:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()

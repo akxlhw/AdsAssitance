@@ -69,10 +69,16 @@ class TemplateLoader:
 
     def _backup_corrupt_override_file(self) -> None:
         """将损坏的覆盖文件重命名为带时间戳的备份。"""
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        backup_path = self.overrides_path.with_suffix(
-            f"{self.overrides_path.suffix}.bak.{timestamp}"
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        backup_path = self.overrides_path.parent / (
+            f"{self.overrides_path.name}.bak.{timestamp}"
         )
+        counter = 1
+        while backup_path.exists():
+            backup_path = self.overrides_path.parent / (
+                f"{self.overrides_path.name}.bak.{timestamp}.{counter}"
+            )
+            counter += 1
         try:
             os.replace(self.overrides_path, backup_path)
         except OSError as exc:
@@ -94,10 +100,12 @@ class TemplateLoader:
 
     def save_override(self, name: str, content: str) -> None:
         """保存用户自定义模板到覆盖层。"""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("模板名称必须是非空字符串")
         if not isinstance(content, str):
             raise ValueError("模板覆盖内容必须是字符串")
-        if content == "":
-            raise ValueError("模板覆盖内容不能为空字符串")
+        if not content.strip():
+            raise ValueError("模板覆盖内容不能为空字符串或仅包含空白字符")
         with self._lock:
             self._overrides[name] = content
             self._persist_overrides()
@@ -111,7 +119,9 @@ class TemplateLoader:
     def _persist_overrides(self) -> None:
         """原子性地将覆盖层写入 JSON 文件。"""
         self.overrides_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = self.overrides_path.with_suffix(".tmp")
+        temp_path = self.overrides_path.with_suffix(
+            f"{self.overrides_path.suffix}.tmp"
+        )
         temp_path.write_text(
             json.dumps(self._overrides, ensure_ascii=False, indent=2),
             encoding="utf-8",
