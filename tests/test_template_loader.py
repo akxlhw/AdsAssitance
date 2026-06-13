@@ -94,7 +94,8 @@ def test_is_overridden(tmp_path: Path) -> None:
     assert loader.is_overridden("b.txt") is False
 
 
-def test_save_empty_string_raises_value_error(tmp_path: Path) -> None:
+@pytest.mark.parametrize("content", ["", "   ", "\n\t"])
+def test_save_empty_or_whitespace_content_raises_value_error(tmp_path: Path, content: str) -> None:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     (templates_dir / "product_report.txt").write_text("default prompt", encoding="utf-8")
@@ -103,10 +104,10 @@ def test_save_empty_string_raises_value_error(tmp_path: Path) -> None:
     loader = TemplateLoader(templates_dir=templates_dir, overrides_path=overrides_path)
 
     with pytest.raises(ValueError, match="不能为空字符串"):
-        loader.save_override("product_report.txt", "")
+        loader.save_override("product_report.txt", content)
 
 
-def test_non_string_values_in_override_file_raise_value_error(tmp_path: Path) -> None:
+def test_non_string_values_in_override_file_are_backed_up_and_return_defaults(tmp_path: Path) -> None:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
     (templates_dir / "product_report.txt").write_text("default prompt", encoding="utf-8")
@@ -114,5 +115,23 @@ def test_non_string_values_in_override_file_raise_value_error(tmp_path: Path) ->
     overrides_path = tmp_path / "overrides.json"
     overrides_path.write_text(json.dumps({"product_report.txt": ["not", "a", "string"]}, ensure_ascii=False), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="必须是字符串"):
-        TemplateLoader(templates_dir=templates_dir, overrides_path=overrides_path)
+    loader = TemplateLoader(templates_dir=templates_dir, overrides_path=overrides_path)
+    assert loader.load("product_report.txt") == "default prompt"
+    assert not overrides_path.exists()
+
+    backups = list(tmp_path.glob("overrides.json.bak.*"))
+    assert len(backups) == 1
+    assert json.loads(backups[0].read_text(encoding="utf-8")) == {"product_report.txt": ["not", "a", "string"]}
+
+
+@pytest.mark.parametrize("name", ["", "   ", "\n\t", 123, None])
+def test_reset_override_invalid_name_raises_value_error(tmp_path: Path, name) -> None:
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "product_report.txt").write_text("default prompt", encoding="utf-8")
+
+    overrides_path = tmp_path / "overrides.json"
+    loader = TemplateLoader(templates_dir=templates_dir, overrides_path=overrides_path)
+
+    with pytest.raises(ValueError, match="必须是非空字符串"):
+        loader.reset_override(name)

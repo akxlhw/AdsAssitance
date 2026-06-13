@@ -60,11 +60,16 @@ class TemplateLoader:
         validated: dict[str, str] = {}
         for key, value in data.items():
             if not isinstance(value, str):
-                raise ValueError(
-                    f"覆盖配置文件中的值必须是字符串: key={key!r}, "
-                    f"type={type(value).__name__}"
+                logger.warning(
+                    "覆盖配置文件包含非字符串值，已备份并忽略: %s "
+                    "(key=%r, type=%s)",
+                    self.overrides_path,
+                    key,
+                    type(value).__name__,
                 )
-            validated[str(key)] = value
+                self._backup_corrupt_override_file()
+                return {}
+            validated[key] = value
         return validated
 
     def _backup_corrupt_override_file(self) -> None:
@@ -112,6 +117,8 @@ class TemplateLoader:
 
     def reset_override(self, name: str) -> None:
         """删除覆盖层，恢复默认模板。"""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("模板名称必须是非空字符串")
         with self._lock:
             self._overrides.pop(name, None)
             self._persist_overrides()
