@@ -27,6 +27,15 @@ from coupangads.text.title import generate_product_title
 class ProductPipeline:
     """单个产品的完整生成流水线。"""
 
+    STEP_DEPENDENCIES: dict[str, tuple[str, ...]] = {
+        "product_report": (),
+        "title": ("product_report",),
+        "keywords": ("product_report", "title"),
+        "selling_points": ("product_report", "title", "keywords"),
+        "instagram": ("product_report", "title", "keywords", "selling_points"),
+        "images": ("product_report", "title", "keywords", "selling_points"),
+    }
+
     def __init__(
         self,
         text_adapter: TextAdapter,
@@ -37,15 +46,38 @@ class ProductPipeline:
         start_from: str | None = None,
         request_delay: float = 0.0,
         progress_callback: Callable[[dict], None] | None = None,
+        vision_adapter: TextAdapter | None = None,
+        enabled_steps: set[str] | None = None,
+        abort_callback: Callable[[], None] | None = None,
     ) -> None:
         self.text_adapter = text_adapter
         self.image_adapter = image_adapter
+        self.vision_adapter = vision_adapter or text_adapter
         self.templates = templates
         self.overwrite = overwrite
         self.max_images = max_images
         self.start_from = start_from
         self.request_delay = request_delay
         self.progress_callback = progress_callback
+        self.enabled_steps = enabled_steps or set(self.STEP_DEPENDENCIES.keys())
+        self.required_steps = self._compute_required_steps(self.enabled_steps)
+        self._abort_callback = abort_callback
+
+    def _compute_required_steps(self, enabled: set[str]) -> set[str]:
+        """计算需要执行的步骤集合（包含上游依赖）。"""
+        required: set[str] = set()
+
+        def add_step(step: str) -> None:
+            if step in required:
+                return
+            required.add(step)
+            for dep in self.STEP_DEPENDENCIES.get(step, ()):
+                add_step(dep)
+
+        for step in enabled:
+            if step in self.STEP_DEPENDENCIES:
+                add_step(step)
+        return required
 
     def _emit_progress(
         self, step: str, status: str, progress: int, message: str = ""
@@ -60,6 +92,11 @@ class ProductPipeline:
                     "message": message,
                 }
             )
+
+    def _check_abort(self) -> None:
+        """如果外部请求中止，则调用回调；回调抛出的异常原样向上传播。"""
+        if self._abort_callback is not None:
+            self._abort_callback()
 
     def _needs_run(self, target: Path, *dependencies: Path) -> bool:
         """判断目标文件是否需要重新生成。"""
@@ -83,6 +120,12 @@ class ProductPipeline:
         logger = get_logger(f"pipeline.{product_input_dir.name}")
         add_file_handler(logger, product_output_dir / config.RUN_LOG_FILE)
 
+        self._check_abort()
+
+        if not self.required_steps:
+            self._emit_progress("images", "completed", 100, "没有选择任何步骤")
+            return
+
         self._emit_progress("product_report", "started", 5, "开始生成商品画像")
 
         image_paths = sorted(
@@ -96,83 +139,95 @@ class ProductPipeline:
             )
             return
 
-        # 1. 商品画像
+        # 1. 商品画像（需要视觉能力，使用 vision_adapter）
         report_path = product_output_dir / config.PRODUCT_REPORT_FILE
-        if self._needs_run(report_path, *image_paths):
-            logger.info("生成商品画像报告")
-            report = generate_product_report(
-                self.text_adapter, image_paths, report_path, self.templates
-            )
-        else:
-            logger.info("复用商品画像报告")
-            report = read_text_file(report_path)
-        self._emit_progress("product_report", "completed", 15, "商品画像完成")
+        if "product_report" in self.required_steps:
+            self._check_abort()
+            if self._needs_run(report_path, *image_paths):
+                logger.info("生成商品画像报告")
+                report = generate_product_report(
+                    self.vision_adapter, image_paths, report_path, self.templates
+                )
+            else:
+                logger.info("复用商品画像报告")
+                report = read_text_file(report_path)
+            self._emit_progress("product_report", "completed", 15, "商品画像完成")
 
         # 2. 标题
         title_path = product_output_dir / config.PRODUCT_TITLE_FILE
-        if self._needs_run(title_path, report_path):
-            logger.info("生成商品标题")
-            title = generate_product_title(
-                self.text_adapter, report, title_path, self.templates
-            )
-        else:
-            logger.info("复用商品标题")
-            title = read_text_file(title_path)
-        self._emit_progress("title", "completed", 30, "标题完成")
+        if "title" in self.required_steps:
+            self._check_abort()
+            if self._needs_run(title_path, report_path):
+                logger.info("生成商品标题")
+                title = generate_product_title(
+                    self.text_adapter, report, title_path, self.templates
+                )
+            else:
+                logger.info("复用商品标题")
+                title = read_text_file(title_path)
+            self._emit_progress("title", "completed", 30, "标题完成")
 
         # 3. 关键词
         keywords_path = product_output_dir / config.WING_KEYWORDS_FILE
-        if self._needs_run(keywords_path, report_path, title_path):
-            logger.info("生成关键词")
-            keywords = generate_keywords(
-                self.text_adapter, report, title, keywords_path, self.templates
-            )
-        else:
-            logger.info("复用关键词")
-            keywords = read_text_file(keywords_path)
-        self._emit_progress("keywords", "completed", 40, "关键词完成")
+        if "keywords" in self.required_steps:
+            self._check_abort()
+            if self._needs_run(keywords_path, report_path, title_path):
+                logger.info("生成关键词")
+                keywords = generate_keywords(
+                    self.text_adapter, report, title, keywords_path, self.templates
+                )
+            else:
+                logger.info("复用关键词")
+                keywords = read_text_file(keywords_path)
+            self._emit_progress("keywords", "completed", 40, "关键词完成")
 
         # 4. 卖点
         sp_md_path = product_output_dir / config.SELLING_POINTS_FILE
         sp_json_path = product_output_dir / config.SELLING_POINTS_JSON_FILE
-        if self._needs_run(sp_md_path, report_path, title_path, keywords_path):
-            logger.info("生成卖点文案")
-            selling_points = generate_selling_points(
-                self.text_adapter,
-                report,
-                title,
-                keywords,
-                sp_md_path,
-                sp_json_path,
-                self.templates,
-            )
-        else:
-            logger.info("复用卖点文案")
-            selling_points = parse_selling_points(read_text_file(sp_md_path))
-        self._emit_progress("selling_points", "completed", 50, "卖点完成")
+        if "selling_points" in self.required_steps:
+            self._check_abort()
+            if self._needs_run(sp_md_path, report_path, title_path, keywords_path):
+                logger.info("生成卖点文案")
+                selling_points = generate_selling_points(
+                    self.text_adapter,
+                    report,
+                    title,
+                    keywords,
+                    sp_md_path,
+                    sp_json_path,
+                    self.templates,
+                )
+            else:
+                logger.info("复用卖点文案")
+                selling_points = parse_selling_points(read_text_file(sp_md_path))
+            self._emit_progress("selling_points", "completed", 50, "卖点完成")
 
         # 5. INS
         ins_path = product_output_dir / config.INSTAGRAM_FILE
-        if self._needs_run(ins_path, sp_md_path):
-            logger.info("生成 Instagram 文案")
-            generate_instagram(
-                self.text_adapter,
-                report,
-                title,
-                keywords,
-                read_text_file(sp_md_path),
-                ins_path,
-                self.templates,
-            )
-        else:
-            logger.info("复用 Instagram 文案")
-        self._emit_progress("instagram", "completed", 55, "INS 文案完成")
+        if "instagram" in self.required_steps:
+            self._check_abort()
+            if self._needs_run(ins_path, sp_md_path):
+                logger.info("生成 Instagram 文案")
+                generate_instagram(
+                    self.text_adapter,
+                    report,
+                    title,
+                    keywords,
+                    read_text_file(sp_md_path),
+                    ins_path,
+                    self.templates,
+                )
+            else:
+                logger.info("复用 Instagram 文案")
+            self._emit_progress("instagram", "completed", 55, "INS 文案完成")
 
-        # 仅文本模式
-        if self.max_images == 0:
-            logger.info("仅文本模式，跳过图片生成")
+        # 图片阶段
+        if "images" not in self.required_steps or self.max_images == 0:
+            logger.info("跳过图片生成")
             self._emit_progress("images", "completed", 100, "文本内容全部完成")
             return
+
+        self._check_abort()
 
         # 6. 参考图筛选
         refs = select_best_reference_images(image_paths)
@@ -182,11 +237,15 @@ class ProductPipeline:
         refs_path = product_output_dir / config.BEST_REFERENCE_IMAGES_FILE
         write_json_file(refs_path, [r.filename for r in refs])
 
+        self._check_abort()
+
         # 7. 产品上下文
         global_constraints = self.templates.load("image_global_constraints.txt")
         product_context = build_product_context(report, title, keywords, global_constraints)
         context_path = product_output_dir / config.PRODUCT_CONTEXT_FILE
         write_text_file(context_path, product_context)
+
+        self._check_abort()
 
         # 8. 图片提示词
         prompts_path = product_output_dir / config.IMAGE_PROMPTS_FILE
@@ -231,6 +290,7 @@ class ProductPipeline:
                 start_from=self.start_from,
                 delay=self.request_delay,
                 progress_callback=_image_progress,
+                abort_callback=self._check_abort,
             )
         else:
             logger.info("所有图片已存在，跳过图片生成")

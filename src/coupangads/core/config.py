@@ -5,8 +5,14 @@ from pathlib import Path
 # 模型常量
 GEMINI_TEXT_MODEL = "gemini-2.5-flash"
 GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
-DOUBAO_TEXT_MODEL = "doubao-seed-2-0-lite-260215"
+DOUBAO_TEXT_MODEL = "doubao-seed-2-0-lite-260428"
+DOUBAO_VISION_MODEL = "doubao-seed-2-0-lite-260428"
 DOUBAO_IMAGE_MODEL = "doubao-seedream-5-0-260128"
+
+# DeepSeek defaults
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+DEEPSEEK_TEXT_MODEL = "deepseek-v4-pro"
+DEEPSEEK_API_KEY_FILE = Path("deepseekkey.md")
 
 # 图像常量
 REFERENCE_IMAGE_MAX_LONG_EDGE = 1536

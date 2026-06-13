@@ -13,6 +13,12 @@ const ANIMATION_DURATION = 600;
 
 let _cachedSteps = [];
 let _currentNumberAnimation = null;
+let _currentProductId = null;
+let _currentSteps = [];
+let _abortRequested = false;
+let _isCompleted = false;
+let _evtSource = null;
+let _lastProgress = 0;
 
 function getStepForFile(name) {
   if (name === 'productreport.md') return 'product_report';
@@ -60,8 +66,146 @@ async function syncPreviewBar(productId) {
   }
 }
 
-export function startProgress(productId, selectedSteps) {
-  _cachedSteps = [];
+function updateUrlProductId(productId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('product_id', productId);
+  window.history.replaceState({}, '', url);
+}
+
+function clearUrlProductId() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('product_id');
+  window.history.replaceState({}, '', url);
+}
+
+function getAbortLink() {
+  return document.getElementById('abort-link');
+}
+
+function getAbortError() {
+  return document.getElementById('abort-error');
+}
+
+function getAbortedState() {
+  return document.getElementById('aborted-state');
+}
+
+function getProgressBar() {
+  return document.getElementById('progress-bar');
+}
+
+function getProgressMessage() {
+  return document.getElementById('progress-message');
+}
+
+function getProgressMessageText() {
+  return document.getElementById('progress-message-text');
+}
+
+function getProgressPercent() {
+  return document.getElementById('progress-percent');
+}
+
+function getProgressShimmer() {
+  return document.getElementById('progress-bar-shimmer');
+}
+
+function resetAbortUI() {
+  const link = getAbortLink();
+  const error = getAbortError();
+  const abortedState = getAbortedState();
+  if (link) {
+    link.disabled = false;
+    link.textContent = '中止';
+    link.classList.remove('hidden', 'is-loading');
+  }
+  if (error) {
+    error.textContent = '';
+    error.classList.add('hidden');
+  }
+  if (abortedState) abortedState.classList.add('hidden');
+}
+
+function showAbortError(message) {
+  const error = getAbortError();
+  if (!error) return;
+  error.textContent = message;
+  error.classList.remove('hidden');
+}
+
+function setAbortLoading(loading) {
+  const link = getAbortLink();
+  if (!link) return;
+  link.disabled = loading;
+  link.textContent = loading ? '正在中止...' : '中止';
+  link.classList.toggle('is-loading', loading);
+}
+
+function setViewResultsHref(productId) {
+  const btn = document.getElementById('view-results-btn');
+  if (btn) {
+    btn.href = `/result/${encodeURIComponent(productId)}`;
+  }
+}
+
+async function requestAbort(productId) {
+  if (_abortRequested) return;
+  _abortRequested = true;
+  setAbortLoading(true);
+
+  try {
+    const res = await fetch(`/api/abort/${encodeURIComponent(productId)}`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch (err) {
+    console.error('[progress] abort request failed:', err);
+    _abortRequested = false;
+    setAbortLoading(false);
+    showAbortError('中止请求失败，请重试');
+  }
+}
+
+function stopProgressAnimation() {
+  const shimmer = getProgressShimmer();
+  if (shimmer) {
+    shimmer.style.animation = 'none';
+    shimmer.style.opacity = '0';
+  }
+}
+
+function showAbortedState(productId, data) {
+  stopProgressAnimation();
+
+  const messageTextEl = getProgressMessageText();
+  if (messageTextEl) messageTextEl.textContent = '生成已中止';
+
+  const progress = data?.progress ?? _lastProgress;
+  updateProgress({ progress });
+
+  const link = getAbortLink();
+  if (link) link.classList.add('hidden');
+
+  setViewResultsHref(productId);
+  const abortedState = getAbortedState();
+  if (abortedState) abortedState.classList.remove('hidden');
+}
+
+function handleAborted(productId, data) {
+  // 如果已经正常完成，忽略迟到的 aborted 事件
+  if (_isCompleted) return;
+
+  if (_evtSource) {
+    _evtSource.close();
+    _evtSource = null;
+  }
+
+  showAbortedState(productId, data);
+}
+
+export function renderAbortedState(productId, data = {}) {
   initPreview();
 
   const previewBar = document.getElementById('progress-preview-bar');
@@ -71,6 +215,39 @@ export function startProgress(productId, selectedSteps) {
   }
 
   showState('progress-state');
+  const steps = STEPS;
+  renderSteps(steps);
+
+  _currentProductId = productId;
+  _currentSteps = steps;
+  _isCompleted = false;
+  _abortRequested = true;
+
+  resetAbortUI();
+  showAbortedState(productId, data);
+  syncPreviewBar(productId).catch(err => {
+    console.error('[progress] preview sync failed:', err);
+  });
+}
+
+export function startProgress(productId, selectedSteps) {
+  _cachedSteps = [];
+  _currentProductId = productId;
+  _currentSteps = selectedSteps;
+  _abortRequested = false;
+  _isCompleted = false;
+  initPreview();
+
+  const previewBar = document.getElementById('progress-preview-bar');
+  if (previewBar) {
+    previewBar.innerHTML = '';
+    enableDragScroll(previewBar);
+  }
+
+  showState('progress-state');
+  updateUrlProductId(productId);
+  resetAbortUI();
+
   const steps = selectedSteps && selectedSteps.length
     ? STEPS.filter(s => selectedSteps.includes(s.key))
     : STEPS;
@@ -78,6 +255,24 @@ export function startProgress(productId, selectedSteps) {
 
   const safeProductId = encodeURIComponent(productId);
   const evtSource = new EventSource(`/api/progress/${safeProductId}`);
+  _evtSource = evtSource;
+
+  const abortLink = getAbortLink();
+  if (abortLink) {
+    abortLink.onclick = () => requestAbort(productId);
+  }
+
+  evtSource.addEventListener('aborted', (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch (err) {
+      console.error('[progress] failed to parse aborted event:', err);
+      return;
+    }
+    console.log('[progress] SSE aborted event:', data);
+    handleAborted(productId, data);
+  });
 
   evtSource.onmessage = (event) => {
     let data;
@@ -86,11 +281,19 @@ export function startProgress(productId, selectedSteps) {
     } catch (err) {
       console.error('[progress] failed to parse SSE data:', err);
       evtSource.close();
+      _evtSource = null;
       showError('进度数据异常');
       return;
     }
 
     console.log('[progress] SSE message:', data);
+
+    // 后端未发送命名事件时的降级处理
+    if (data.status === 'aborted') {
+      handleAborted(productId, data);
+      return;
+    }
+
     updateProgress(data);
     updateSteps(data, steps);
     updateMessage(data, steps);
@@ -102,13 +305,17 @@ export function startProgress(productId, selectedSteps) {
     if (data.status === 'error') {
       console.log('[progress] SSE error, closing');
       evtSource.close();
+      _evtSource = null;
       showError(data.message || '未知错误');
       return;
     }
 
     if (data.status === 'completed' && data.progress === 100) {
       console.log('[progress] SSE final completed, closing');
+      _isCompleted = true;
       evtSource.close();
+      _evtSource = null;
+      clearUrlProductId();
       setTimeout(() => {
         import('./gallery.js').then(m => {
           m.loadResult(productId, selectedSteps, data);
@@ -123,15 +330,23 @@ export function startProgress(productId, selectedSteps) {
     console.error('[progress] SSE error:', err);
     showError('连接异常，请刷新页面重试');
     evtSource.close();
+    _evtSource = null;
+
+    const link = getAbortLink();
+    if (link && link.disabled && link.textContent === '正在中止...') {
+      setAbortLoading(false);
+      _abortRequested = false;
+    }
   };
 }
 
 function updateProgress(data) {
-  const bar = document.getElementById('progress-bar');
-  const percentEl = document.getElementById('progress-percent');
+  const bar = getProgressBar();
+  const percentEl = getProgressPercent();
   if (!bar || !percentEl) return;
 
   const target = data.progress || 0;
+  _lastProgress = target;
   const current = parseInt(percentEl.textContent, 10) || 0;
 
   bar.style.width = `${target}%`;
@@ -161,25 +376,30 @@ function animateNumber(element, from, to, duration) {
 }
 
 function updateMessage(data, steps) {
-  const messageEl = document.getElementById('progress-message');
-  if (!messageEl) return;
+  const messageEl = getProgressMessage();
+  const messageTextEl = getProgressMessageText();
+  if (!messageEl || !messageTextEl) return;
 
   const activeStep = steps.find(s => s.key === data.step);
-  const nextMessage = data.status === 'completed'
-    ? '生成完成'
-    : (activeStep?.message || '准备中...');
+  let nextMessage = '准备中...';
+  if (data.status === 'completed') {
+    nextMessage = '生成完成';
+  } else if (activeStep) {
+    nextMessage = activeStep.message;
+  }
 
-  if (messageEl.textContent === nextMessage) return;
+  if (messageTextEl.textContent === nextMessage) return;
 
   messageEl.classList.add('is-fading');
   setTimeout(() => {
-    messageEl.textContent = nextMessage;
+    messageTextEl.textContent = nextMessage;
     messageEl.classList.remove('is-fading');
   }, 300);
 }
 
 function renderSteps(steps) {
   const container = document.getElementById('steps');
+  if (!container) return;
   container.innerHTML = steps.map(s => `
     <span class="progress-step" data-step="${s.key}">${s.label}</span>
   `).join('');
@@ -205,9 +425,9 @@ function updateSteps(data, steps) {
 }
 
 function showError(message) {
-  const messageEl = document.getElementById('progress-message');
-  const bar = document.getElementById('progress-bar');
-  if (messageEl) messageEl.textContent = `生成失败：${message}`;
+  const messageTextEl = getProgressMessageText();
+  const bar = getProgressBar();
+  if (messageTextEl) messageTextEl.textContent = `生成失败：${message}`;
   if (bar) bar.style.background = 'var(--error, #ff3b30)';
 }
 
@@ -217,6 +437,7 @@ function showState(id) {
     el.classList.remove('state-transition');
   });
   const target = document.getElementById(id);
+  if (!target) return;
   target.classList.remove('hidden');
   // Trigger reflow for transition
   void target.offsetWidth;

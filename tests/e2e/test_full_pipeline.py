@@ -12,6 +12,9 @@ class FakeTextAdapter:
     def chat(self, prompt: str) -> str:
         return "한국어 샘플 응답"
 
+    def chat_with_images(self, prompt: str, image_paths: list) -> str:
+        return self.chat(prompt)
+
 
 class FakeImageAdapter:
     def generate_image(self, prompt, references, output_path: Path) -> bool:

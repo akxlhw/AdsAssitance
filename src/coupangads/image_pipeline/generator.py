@@ -20,6 +20,7 @@ def generate_detail_images(
     start_from: str | None = None,
     delay: float = 0.0,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    abort_callback: Callable[[], None] | None = None,
 ) -> list[Path]:
     """
     逐张生成详情页图片。
@@ -28,6 +29,7 @@ def generate_detail_images(
     - 支持 start_from 从指定键恢复（如 A_B4）
     - 单张失败记录并继续
     - 支持 progress_callback(completed_count, total_count, filename) 汇报进度
+    - 支持 abort_callback 在每张图片生成前检查是否中止
     """
     generated: list[Path] = []
     started = start_from is None
@@ -45,6 +47,9 @@ def generate_detail_images(
 
         if max_images is not None and attempted >= max_images:
             break
+
+        if abort_callback is not None:
+            abort_callback()
 
         attempted += 1
         output_path = output_dir / prompt.filename

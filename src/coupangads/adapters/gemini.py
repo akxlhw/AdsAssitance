@@ -4,6 +4,7 @@ from pathlib import Path
 
 from google import genai
 from google.genai import types
+from PIL import Image
 
 from coupangads.adapters.base import ImageAdapter, TextAdapter
 from coupangads.core import config
@@ -29,6 +30,14 @@ class GeminiClientAdapter(TextAdapter, ImageAdapter):
         """使用对话模式发送文本请求。"""
         self._ensure_chat()
         response = self._chat.send_message(prompt)
+        return response.text or ""
+
+    def chat_with_images(self, prompt: str, image_paths: list[Path]) -> str:
+        """使用对话模式发送带图片的多模态请求。"""
+        self._ensure_chat()
+        contents = [Image.open(p) for p in image_paths]
+        contents.append(prompt)
+        response = self._chat.send_message(contents)
         return response.text or ""
 
     def generate_image(

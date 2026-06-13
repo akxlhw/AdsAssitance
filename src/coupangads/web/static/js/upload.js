@@ -3,8 +3,28 @@ export function initUpload(onStart) {
   const input = document.getElementById('file-input');
   const grid = document.getElementById('thumbnail-grid');
   const startBtn = document.getElementById('start-btn');
+  const toggleBtn = document.getElementById('toggle-steps');
   let files = [];
   let objectUrls = [];
+
+  function updateToggleLabel() {
+    const all = document.querySelectorAll('.step-option input');
+    const checked = document.querySelectorAll('.step-option input:checked');
+    if (!toggleBtn) return;
+    toggleBtn.textContent = all.length === checked.length ? '取消全选' : '全选';
+  }
+
+  toggleBtn?.addEventListener('click', () => {
+    const all = document.querySelectorAll('.step-option input');
+    const checked = document.querySelectorAll('.step-option input:checked');
+    const shouldCheck = checked.length !== all.length;
+    all.forEach(cb => cb.checked = shouldCheck);
+    updateToggleLabel();
+  });
+
+  document.querySelectorAll('.step-option input').forEach(cb => {
+    cb.addEventListener('change', updateToggleLabel);
+  });
 
   zone.addEventListener('click', () => input.click());
   input.addEventListener('change', (e) => handleFiles(e.target.files));
@@ -34,10 +54,15 @@ export function initUpload(onStart) {
       const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
       if (!uploadRes.ok) throw new Error('上传失败');
 
-      const genRes = await fetch(`/api/generate/${productName}`, { method: 'POST' });
+      const steps = Array.from(document.querySelectorAll('.step-option input:checked')).map(i => i.value);
+      const genRes = await fetch(`/api/generate/${productName}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steps }),
+      });
       if (!genRes.ok) throw new Error('生成任务启动失败');
 
-      if (onStart) onStart(productName);
+      if (onStart) onStart(productName, steps);
     } catch (err) {
       alert(err.message);
       startBtn.disabled = false;

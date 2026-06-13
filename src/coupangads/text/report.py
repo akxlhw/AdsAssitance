@@ -15,13 +15,11 @@ def generate_product_report(
     templates: TemplateLoader,
 ) -> str:
     """生成商品画像报告。"""
-    # 当前版本：文本链路不直接传图，通过 adapter chat 触发。
-    # 未来多模态版本可将图片作为 contents 传入。
     template = templates.load("product_report.txt")
     prompt = assemble_text_prompt(
         template,
         image_count=str(len(image_paths)),
     )
-    report = adapter.chat(prompt)
+    report = adapter.chat_with_images(prompt, image_paths)
     write_text_file(output_path, report)
     return report

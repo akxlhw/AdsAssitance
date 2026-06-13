@@ -3,6 +3,7 @@
 import time
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from coupangads.orchestration.pipeline import ProductPipeline
@@ -61,6 +62,9 @@ class FakeTextAdapter:
         self.idx += 1
         return resp
 
+    def chat_with_images(self, prompt: str, image_paths: list) -> str:
+        return self.chat(prompt)
+
 
 class CountingTextAdapter(FakeTextAdapter):
     """记录 chat 调用次数的适配器。"""
@@ -72,6 +76,10 @@ class CountingTextAdapter(FakeTextAdapter):
     def chat(self, prompt: str) -> str:
         self.call_count += 1
         return super().chat(prompt)
+
+    def chat_with_images(self, prompt: str, image_paths: list) -> str:
+        self.call_count += 1
+        return super().chat_with_images(prompt, image_paths)
 
 
 class FakeImageAdapter:
@@ -229,3 +237,101 @@ def test_pipeline_overwrite_regenerates_images(tmp_path: Path) -> None:
     pipeline2.run(input_dir, output_dir)
 
     assert image_adapter.calls - first_run_calls == 18
+
+
+
+def test_pipeline_runs_only_selected_steps(tmp_path: Path) -> None:
+    """只选择 title 时，仅生成商品画像（依赖）和标题。"""
+    input_dir, output_dir, templates_dir = _setup_product(tmp_path)
+
+    text_adapter = CountingTextAdapter()
+    pipeline = ProductPipeline(
+        text_adapter=text_adapter,
+        image_adapter=FakeImageAdapter(),
+        templates=TemplateLoader(templates_dir),
+        enabled_steps={"title"},
+        max_images=0,
+    )
+    pipeline.run(input_dir, output_dir)
+
+    assert (output_dir / "productreport.md").exists()
+    assert (output_dir / "product_title.md").exists()
+    assert not (output_dir / "wing_keywords.md").exists()
+    assert not (output_dir / "instagram.md").exists()
+    # product_report (vision chat counts as 2 in CountingTextAdapter) + title = 3
+    assert text_adapter.call_count == 3
+
+
+def test_pipeline_auto_runs_missing_upstream_for_images(tmp_path: Path) -> None:
+    """只选择 images 但上游文件不存在时，自动补齐上游步骤。"""
+    input_dir, output_dir, templates_dir = _setup_product(tmp_path)
+
+    text_adapter = CountingTextAdapter()
+    image_adapter = CountingImageAdapter()
+    pipeline = ProductPipeline(
+        text_adapter=text_adapter,
+        image_adapter=image_adapter,
+        templates=TemplateLoader(templates_dir),
+        enabled_steps={"images"},
+    )
+    pipeline.run(input_dir, output_dir)
+
+    # 上游文本步骤自动执行：report(vision=2) + title + keywords + selling_points = 5 calls
+    assert text_adapter.call_count == 5
+    # 18 张图片
+    assert image_adapter.calls == 18
+
+
+def test_pipeline_abort_callback_propagates_exception(tmp_path: Path) -> None:
+    """abort_callback 抛出异常时应中断流水线并原样向上传播。"""
+    input_dir, output_dir, templates_dir = _setup_product(tmp_path)
+
+    class AbortNow(Exception):
+        pass
+
+    def check_abort() -> None:
+        raise AbortNow()
+
+    pipeline = ProductPipeline(
+        text_adapter=FakeTextAdapter(),
+        image_adapter=FakeImageAdapter(),
+        templates=TemplateLoader(templates_dir),
+        abort_callback=check_abort,
+        max_images=0,
+    )
+
+    with pytest.raises(AbortNow):
+        pipeline.run(input_dir, output_dir)
+
+    assert not (output_dir / "productreport.md").exists()
+
+
+def test_pipeline_abort_callback_stops_between_steps(tmp_path: Path) -> None:
+    """abort_callback 在步骤之间抛出异常时，已完成的文本步骤保留，后续步骤不执行。"""
+    input_dir, output_dir, templates_dir = _setup_product(tmp_path)
+
+    class AbortNow(Exception):
+        pass
+
+    call_count = 0
+
+    def check_abort() -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 3:
+            raise AbortNow()
+
+    pipeline = ProductPipeline(
+        text_adapter=FakeTextAdapter(),
+        image_adapter=FakeImageAdapter(),
+        templates=TemplateLoader(templates_dir),
+        abort_callback=check_abort,
+        max_images=0,
+    )
+
+    with pytest.raises(AbortNow):
+        pipeline.run(input_dir, output_dir)
+
+    # 第一个检查点在 run() 开头，第二个在商品画像步骤开始，第三个在标题步骤开始时触发中止
+    assert (output_dir / "productreport.md").exists()
+    assert not (output_dir / "product_title.md").exists()
