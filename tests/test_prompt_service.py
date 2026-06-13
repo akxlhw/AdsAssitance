@@ -10,8 +10,18 @@ from coupangads.text.template_loader import TemplateLoader
 def service(tmp_path: Path) -> PromptService:
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir()
-    (templates_dir / "product_report.txt").write_text("default", encoding="utf-8")
-    (templates_dir / "product_title.txt").write_text("default title", encoding="utf-8")
+    template_files = [
+        "product_report.txt",
+        "product_title.txt",
+        "wing_keywords.txt",
+        "selling_points.txt",
+        "instagram.txt",
+        "image_prompt.txt",
+        "image_global_constraints.txt",
+        "style_rules.txt",
+    ]
+    for filename in template_files:
+        (templates_dir / filename).write_text("default", encoding="utf-8")
 
     overrides_path = tmp_path / "overrides.json"
     loader = TemplateLoader(templates_dir=templates_dir, overrides_path=overrides_path)
@@ -21,8 +31,8 @@ def service(tmp_path: Path) -> PromptService:
 def test_list_prompts(service: PromptService) -> None:
     prompts = service.list_prompts()
     names = {p["name"] for p in prompts}
-    assert "product_report" in names
-    assert "product_title" in names
+    assert "product_report.txt" in names
+    assert "product_title.txt" in names
 
 
 def test_get_prompt_default(service: PromptService) -> None:
@@ -45,6 +55,16 @@ def test_reset_prompt(service: PromptService) -> None:
 def test_unknown_prompt_raises(service: PromptService) -> None:
     with pytest.raises(KeyError):
         service.get_prompt("unknown.txt")
+
+
+def test_update_unknown_prompt_raises(service: PromptService) -> None:
+    with pytest.raises(KeyError):
+        service.update_prompt("unknown", "x")
+
+
+def test_reset_unknown_prompt_raises(service: PromptService) -> None:
+    with pytest.raises(KeyError):
+        service.reset_prompt("unknown")
 
 
 def test_update_prompt_empty_content_raises(service: PromptService) -> None:

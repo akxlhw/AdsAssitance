@@ -1,6 +1,7 @@
 """Prompt 管理服务：封装 TemplateLoader，提供业务级读写接口。"""
 
 from dataclasses import dataclass
+from typing import Any
 
 from coupangads.text.template_loader import TemplateLoader
 
@@ -57,7 +58,7 @@ class PromptMeta:
     variables: list[str]
     is_overridden: bool
 
-    def __getitem__(self, key: str):
+    def __getitem__(self, key: str) -> Any:
         """支持以字典方式访问字段，便于序列化与模板渲染。"""
         return self.__dict__[key]
 
@@ -71,10 +72,12 @@ class PromptService:
         """将业务名称统一为带 .txt 后缀的注册表键。"""
         return name if name.endswith(".txt") else f"{name}.txt"
 
-    @staticmethod
-    def _display_name(name: str) -> str:
-        """将注册表键转换为业务展示名称（去掉 .txt 后缀）。"""
-        return name[:-4] if name.endswith(".txt") else name
+    def _resolve_name(self, name: str) -> str:
+        """返回名称对应的注册表键；未知 Prompt 会抛出 KeyError。"""
+        canonical = self._canonical_name(name)
+        if canonical not in PROMPT_REGISTRY:
+            raise KeyError(f"Unknown prompt: {name}")
+        return canonical
 
     def list_prompts(self) -> list[PromptMeta]:
         """列出所有已注册 Prompt 的元信息，包括变量与覆盖状态。"""
@@ -82,10 +85,10 @@ class PromptService:
         for name, meta in PROMPT_REGISTRY.items():
             result.append(
                 PromptMeta(
-                    name=self._display_name(name),
+                    name=name,
                     label=meta["label"],
                     description=meta["description"],
-                    variables=meta["variables"],
+                    variables=list(meta["variables"]),
                     is_overridden=self._loader.is_overridden(name),
                 )
             )
@@ -93,28 +96,20 @@ class PromptService:
 
     def get_prompt(self, name: str) -> str:
         """加载指定 Prompt 的模板内容；存在覆盖层时优先返回覆盖内容。"""
-        canonical = self._canonical_name(name)
-        if canonical not in PROMPT_REGISTRY:
-            raise KeyError(f"Unknown prompt: {name}")
+        canonical = self._resolve_name(name)
         return self._loader.load(canonical)
 
     def update_prompt(self, name: str, content: str) -> None:
         """更新指定 Prompt 的内容并持久化到覆盖层；未知 Prompt 会抛出 KeyError。"""
-        canonical = self._canonical_name(name)
-        if canonical not in PROMPT_REGISTRY:
-            raise KeyError(f"Unknown prompt: {name}")
+        canonical = self._resolve_name(name)
         self._loader.save_override(canonical, content)
 
     def reset_prompt(self, name: str) -> None:
         """重置指定 Prompt 为默认模板；未知 Prompt 会抛出 KeyError。"""
-        canonical = self._canonical_name(name)
-        if canonical not in PROMPT_REGISTRY:
-            raise KeyError(f"Unknown prompt: {name}")
+        canonical = self._resolve_name(name)
         self._loader.reset_override(canonical)
 
     def is_overridden(self, name: str) -> bool:
         """返回指定 Prompt 是否被覆盖；未知 Prompt 会抛出 KeyError。"""
-        canonical = self._canonical_name(name)
-        if canonical not in PROMPT_REGISTRY:
-            raise KeyError(f"Unknown prompt: {name}")
+        canonical = self._resolve_name(name)
         return self._loader.is_overridden(canonical)
