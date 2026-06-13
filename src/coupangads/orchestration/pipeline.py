@@ -1,6 +1,7 @@
 """单产品全流程编排与断点续跑。"""
 
 from pathlib import Path
+from typing import Callable
 
 from coupangads.adapters.base import ImageAdapter, TextAdapter
 from coupangads.core import config
@@ -35,6 +36,7 @@ class ProductPipeline:
         max_images: int | None = None,
         start_from: str | None = None,
         request_delay: float = 0.0,
+        progress_callback: Callable[[dict], None] | None = None,
     ) -> None:
         self.text_adapter = text_adapter
         self.image_adapter = image_adapter
@@ -43,6 +45,21 @@ class ProductPipeline:
         self.max_images = max_images
         self.start_from = start_from
         self.request_delay = request_delay
+        self.progress_callback = progress_callback
+
+    def _emit_progress(
+        self, step: str, status: str, progress: int, message: str = ""
+    ) -> None:
+        """向外部报告当前进度。"""
+        if self.progress_callback:
+            self.progress_callback(
+                {
+                    "step": step,
+                    "status": status,
+                    "progress": progress,
+                    "message": message,
+                }
+            )
 
     def _needs_run(self, target: Path, *dependencies: Path) -> bool:
         """判断目标文件是否需要重新生成。"""
@@ -66,12 +83,17 @@ class ProductPipeline:
         logger = get_logger(f"pipeline.{product_input_dir.name}")
         add_file_handler(logger, product_output_dir / config.RUN_LOG_FILE)
 
+        self._emit_progress("product_report", "started", 5, "开始生成商品画像")
+
         image_paths = sorted(
             p for p in product_input_dir.iterdir()
             if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".heic", ".webp")
         )
         if len(image_paths) < 3:
             logger.warning(f"{product_input_dir.name} 图片不足 3 张，跳过")
+            self._emit_progress(
+                "product_report", "error", 0, f"{product_input_dir.name} 图片不足 3 张"
+            )
             return
 
         # 1. 商品画像
@@ -84,6 +106,7 @@ class ProductPipeline:
         else:
             logger.info("复用商品画像报告")
             report = read_text_file(report_path)
+        self._emit_progress("product_report", "completed", 15, "商品画像完成")
 
         # 2. 标题
         title_path = product_output_dir / config.PRODUCT_TITLE_FILE
@@ -95,6 +118,7 @@ class ProductPipeline:
         else:
             logger.info("复用商品标题")
             title = read_text_file(title_path)
+        self._emit_progress("title", "completed", 30, "标题完成")
 
         # 3. 关键词
         keywords_path = product_output_dir / config.WING_KEYWORDS_FILE
@@ -106,6 +130,7 @@ class ProductPipeline:
         else:
             logger.info("复用关键词")
             keywords = read_text_file(keywords_path)
+        self._emit_progress("keywords", "completed", 40, "关键词完成")
 
         # 4. 卖点
         sp_md_path = product_output_dir / config.SELLING_POINTS_FILE
@@ -124,6 +149,7 @@ class ProductPipeline:
         else:
             logger.info("复用卖点文案")
             selling_points = parse_selling_points(read_text_file(sp_md_path))
+        self._emit_progress("selling_points", "completed", 50, "卖点完成")
 
         # 5. INS
         ins_path = product_output_dir / config.INSTAGRAM_FILE
@@ -140,10 +166,12 @@ class ProductPipeline:
             )
         else:
             logger.info("复用 Instagram 文案")
+        self._emit_progress("instagram", "completed", 55, "INS 文案完成")
 
         # 仅文本模式
         if self.max_images == 0:
             logger.info("仅文本模式，跳过图片生成")
+            self._emit_progress("images", "completed", 100, "文本内容全部完成")
             return
 
         # 6. 参考图筛选
@@ -181,8 +209,19 @@ class ProductPipeline:
                 if not (product_output_dir / p.filename).exists()
             ]
 
+        self._emit_progress("images", "started", 60, "开始生成图片")
         if prompts_to_run:
             logger.info(f"将生成 {len(prompts_to_run)} 张图片")
+
+            def _image_progress(completed: int, total: int, filename: str) -> None:
+                progress = int(60 + (completed / total) * 35)
+                self._emit_progress(
+                    "images",
+                    "in_progress",
+                    progress,
+                    f"生成图片 {completed}/{total}: {filename}",
+                )
+
             generate_detail_images(
                 self.image_adapter,
                 prompts_to_run,
@@ -191,8 +230,10 @@ class ProductPipeline:
                 max_images=self.max_images,
                 start_from=self.start_from,
                 delay=self.request_delay,
+                progress_callback=_image_progress,
             )
         else:
             logger.info("所有图片已存在，跳过图片生成")
 
+        self._emit_progress("images", "completed", 100, "全部完成")
         logger.info(f"{product_input_dir.name} 处理完成")

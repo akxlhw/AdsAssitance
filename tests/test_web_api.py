@@ -1,5 +1,9 @@
 """Web API 单元测试。"""
 
+import json
+import time
+from unittest.mock import MagicMock, patch
+
 from fastapi.testclient import TestClient
 
 from coupangads.web.app import app
@@ -8,7 +12,6 @@ client = TestClient(app)
 
 
 def test_upload_endpoint(tmp_path, monkeypatch) -> None:
-    from pathlib import Path
     from coupangads.core import config
     monkeypatch.setattr(config, "DEFAULT_INPUT_DIR", tmp_path)
 
@@ -61,9 +64,46 @@ def test_config_endpoint(tmp_path, monkeypatch) -> None:
 
 
 def test_generate_endpoint() -> None:
-    response = client.post("/api/generate/test-prod")
+    """确认 /generate 返回 started，不启动真实后台任务。"""
+    with patch("coupangads.web.api._run_pipeline") as mock_run:
+        response = client.post("/api/generate/test-prod")
     assert response.status_code == 200
     assert response.json()["status"] == "started"
+    mock_run.assert_called_once_with("test-prod")
+
+
+def test_generate_starts_pipeline(tmp_path, monkeypatch) -> None:
+    """确认 /generate 会启动后台线程调用 ProductPipeline。"""
+    from coupangads.core import config
+    monkeypatch.setattr(config, "DEFAULT_INPUT_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEFAULT_OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(config, "GEMINI_API_KEY_FILE", tmp_path / "apikey.md")
+    monkeypatch.setattr(config, "PROVIDER_CONFIG_FILE", tmp_path / "provider.json")
+
+    product_dir = tmp_path / "test-prod"
+    product_dir.mkdir()
+    # 流水线要求至少 3 张产品图
+    for i in range(3):
+        (product_dir / f"img{i}.jpg").write_bytes(b"fake")
+    (tmp_path / "apikey.md").write_text("test-key", encoding="utf-8")
+    (tmp_path / "provider.json").write_text(
+        json.dumps({"default_provider": "gemini"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    mock_pipeline = MagicMock()
+    with patch("coupangads.web.api.ProductPipeline", return_value=mock_pipeline):
+        response = client.post("/api/generate/test-prod")
+        assert response.status_code == 200
+        assert response.json()["status"] == "started"
+
+        # 等待后台线程执行并调用 mock pipeline
+        for _ in range(50):
+            if mock_pipeline.run.called:
+                break
+            time.sleep(0.01)
+
+    mock_pipeline.run.assert_called_once()
 
 
 def test_progress_endpoint() -> None:
@@ -83,7 +123,6 @@ def test_progress_endpoint() -> None:
         if "\n\n" in content:
             break
     assert content.startswith("data:")
-    import json
 
     event_data = content.replace("data:", "").strip()
     assert json.loads(event_data)["status"] == "completed"

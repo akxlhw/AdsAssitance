@@ -3,13 +3,19 @@
 import asyncio
 import json
 import re
+import threading
 import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
+from coupangads.adapters.doubao import DoubaoClientAdapter
+from coupangads.adapters.gemini import GeminiClientAdapter
 from coupangads.core import config
+from coupangads.infra.api_keys import read_api_key
+from coupangads.orchestration.pipeline import ProductPipeline
+from coupangads.text.template_loader import TemplateLoader
 
 router = APIRouter(prefix="/api")
 
@@ -43,6 +49,68 @@ def _resolve_under(base: Path, *parts: str) -> Path:
     return target
 
 
+def _get_default_provider() -> str:
+    """读取默认模型线路。"""
+    provider = "gemini"
+    if config.PROVIDER_CONFIG_FILE.exists():
+        try:
+            provider = json.loads(
+                config.PROVIDER_CONFIG_FILE.read_text(encoding="utf-8")
+            ).get("default_provider", "gemini")
+        except Exception:
+            pass
+    return provider
+
+
+def _load_templates() -> TemplateLoader:
+    """定位提示词模板目录。"""
+    templates = TemplateLoader(config.DEFAULT_INPUT_DIR.parent / "templates")
+    if not templates.templates_dir.exists():
+        templates = TemplateLoader(Path("templates"))
+    return templates
+
+
+def _run_pipeline(product_id: str) -> None:
+    """在后台线程中运行产品流水线。"""
+
+    def update_progress(data: dict) -> None:
+        _task_states[product_id] = data
+
+    try:
+        provider = _get_default_provider()
+
+        if provider == "doubao":
+            api_key = read_api_key(
+                config.DOUBAO_API_KEY_FILE, env_var="DOUBAO_API_KEY"
+            )
+            text_adapter = DoubaoClientAdapter(api_key)
+            image_adapter = DoubaoClientAdapter(api_key)
+        else:
+            api_key = read_api_key(
+                config.GEMINI_API_KEY_FILE, env_var="GEMINI_API_KEY"
+            )
+            text_adapter = GeminiClientAdapter(api_key)
+            image_adapter = GeminiClientAdapter(api_key)
+
+        templates = _load_templates()
+        input_dir = config.DEFAULT_INPUT_DIR / product_id
+        output_dir = config.DEFAULT_OUTPUT_DIR / product_id
+
+        pipeline = ProductPipeline(
+            text_adapter=text_adapter,
+            image_adapter=image_adapter,
+            templates=templates,
+            overwrite=False,
+            progress_callback=update_progress,
+            request_delay=2.0,
+        )
+        pipeline.run(input_dir, output_dir)
+    except Exception as exc:
+        update_progress(
+            {"step": "error", "status": "error", "progress": 0, "message": str(exc)}
+        )
+
+
 @router.post("/upload")
 async def upload_product(
     product_name: str = Form(...),
@@ -68,8 +136,9 @@ async def upload_product(
 @router.post("/generate/{product_id}")
 async def generate_product(product_id: str):
     """触发生成（后台任务）。"""
-    _task_states[product_id] = {"status": "pending", "progress": 0}
-    # 实际实现将调用 ProductPipeline 在后台运行
+    _task_states[product_id] = {"status": "pending", "progress": 0, "message": "任务排队中"}
+    thread = threading.Thread(target=_run_pipeline, args=(product_id,), daemon=True)
+    thread.start()
     return {"status": "started", "product_id": product_id}
 
 

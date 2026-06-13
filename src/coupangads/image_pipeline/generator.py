@@ -2,6 +2,7 @@
 
 import time
 from pathlib import Path
+from typing import Callable
 
 from coupangads.adapters.base import ImageAdapter
 from coupangads.core.logging import get_logger
@@ -18,6 +19,7 @@ def generate_detail_images(
     max_images: int | None = None,
     start_from: str | None = None,
     delay: float = 0.0,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> list[Path]:
     """
     逐张生成详情页图片。
@@ -25,6 +27,7 @@ def generate_detail_images(
     - 支持 max_images 限制尝试生成数量
     - 支持 start_from 从指定键恢复（如 A_B4）
     - 单张失败记录并继续
+    - 支持 progress_callback(completed_count, total_count, filename) 汇报进度
     """
     generated: list[Path] = []
     started = start_from is None
@@ -56,6 +59,8 @@ def generate_detail_images(
             if success:
                 generated.append(output_path)
                 logger.info(f"已保存: {output_path}")
+                if progress_callback:
+                    progress_callback(len(generated), len(prompts), prompt.filename)
             else:
                 logger.error(f"生成失败（无输出）: {prompt.filename}")
         except Exception as exc:

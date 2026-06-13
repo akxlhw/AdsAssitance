@@ -6,6 +6,9 @@ venv/
 apikey.md
 dbkey.md
 
+# 运行时配置
+config/
+
 # 输入输出目录
 raw-material/
 result/
