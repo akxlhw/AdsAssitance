@@ -4,6 +4,7 @@ export function initUpload(onStart) {
   const grid = document.getElementById('thumbnail-grid');
   const startBtn = document.getElementById('start-btn');
   let files = [];
+  let objectUrls = [];
 
   zone.addEventListener('click', () => input.click());
   input.addEventListener('change', (e) => handleFiles(e.target.files));
@@ -24,28 +25,24 @@ export function initUpload(onStart) {
     startBtn.disabled = true;
     startBtn.textContent = '上传中...';
 
-    const productName = `prod-${Date.now()}`;
-    const formData = new FormData();
-    formData.append('product_name', productName);
-    files.forEach(f => formData.append('files', f));
+    try {
+      const productName = document.getElementById('product-name').value.trim() || `prod-${Date.now()}`;
+      const formData = new FormData();
+      formData.append('product_name', productName);
+      files.forEach(f => formData.append('files', f));
 
-    const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
-    if (!uploadRes.ok) {
-      alert('上传失败');
+      const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (!uploadRes.ok) throw new Error('上传失败');
+
+      const genRes = await fetch(`/api/generate/${productName}`, { method: 'POST' });
+      if (!genRes.ok) throw new Error('生成任务启动失败');
+
+      if (onStart) onStart(productName);
+    } catch (err) {
+      alert(err.message);
       startBtn.disabled = false;
       startBtn.textContent = '开始生成';
-      return;
     }
-
-    const genRes = await fetch(`/api/generate/${productName}`, { method: 'POST' });
-    if (!genRes.ok) {
-      alert('生成任务启动失败');
-      startBtn.disabled = false;
-      startBtn.textContent = '开始生成';
-      return;
-    }
-
-    if (onStart) onStart(productName);
   });
 
   function handleFiles(fileList) {
@@ -59,12 +56,18 @@ export function initUpload(onStart) {
   }
 
   function renderThumbnails() {
-    grid.innerHTML = files.map((file, idx) => `
+    objectUrls.forEach(url => URL.revokeObjectURL(url));
+    objectUrls = [];
+    grid.innerHTML = files.map((file, idx) => {
+      const url = URL.createObjectURL(file);
+      objectUrls.push(url);
+      return `
       <div class="thumb-wrapper">
-        <img src="${URL.createObjectURL(file)}" class="thumbnail" alt="${file.name}">
+        <img src="${url}" class="thumbnail" alt="${file.name}">
         <button type="button" data-idx="${idx}" class="remove-btn">×</button>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     grid.querySelectorAll('.remove-btn').forEach(btn => {
       btn.addEventListener('click', () => removeFile(parseInt(btn.dataset.idx, 10)));

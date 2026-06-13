@@ -94,6 +94,18 @@ def test_result_endpoint_not_found() -> None:
     assert response.status_code == 404
 
 
+def test_serve_result_file(tmp_path, monkeypatch) -> None:
+    from coupangads.core import config
+    monkeypatch.setattr(config, "DEFAULT_OUTPUT_DIR", tmp_path)
+    output_dir = tmp_path / "test-prod"
+    output_dir.mkdir()
+    (output_dir / "A_B1.png").write_bytes(b"PNG")
+
+    response = client.get("/api/result/test-prod/A_B1.png")
+    assert response.status_code == 200
+    assert response.content == b"PNG"
+
+
 def test_download_endpoint_not_found() -> None:
     response = client.get("/api/download/nonexistent-product-12345")
     assert response.status_code == 404

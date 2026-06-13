@@ -24,6 +24,14 @@ def _safe_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_\-]", "_", cleaned)
 
 
+def _safe_filename(filename: str) -> str:
+    """保留扩展名，但阻止路径遍历。"""
+    base = Path(filename).name
+    if not base or ".." in base or "/" in base or "\\" in base:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    return base
+
+
 def _resolve_under(base: Path, *parts: str) -> Path:
     """解析路径，并确保结果在 base 目录下。"""
     target = (base / _safe_name("/".join(parts))).resolve()
@@ -68,8 +76,6 @@ async def generate_product(product_id: str):
 @router.get("/progress/{product_id}")
 async def progress_stream(product_id: str):
     """SSE 实时进度流。"""
-    from fastapi.responses import StreamingResponse
-
     async def event_generator():
         while True:
             state = _task_states.get(product_id, {"progress": 0, "status": "unknown"})
@@ -98,7 +104,7 @@ async def get_result(product_id: str):
 async def serve_result_file(product_id: str, filename: str):
     """提供结果文件预览。"""
     safe_id = _safe_name(product_id)
-    safe_filename = _safe_name(filename)
+    safe_filename = _safe_filename(filename)
     output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, safe_id)
     file_path = output_dir / safe_filename
     if not file_path.exists():
