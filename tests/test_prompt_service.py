@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from coupangads.text.prompt_service import PromptService
+from coupangads.text.prompt_service import PromptMeta, PromptService
 from coupangads.text.template_loader import TemplateLoader
 
 
@@ -45,3 +45,41 @@ def test_reset_prompt(service: PromptService) -> None:
 def test_unknown_prompt_raises(service: PromptService) -> None:
     with pytest.raises(KeyError):
         service.get_prompt("unknown.txt")
+
+
+def test_update_prompt_empty_content_raises(service: PromptService) -> None:
+    for content in ("", "   ", "\n\t"):
+        with pytest.raises(ValueError):
+            service.update_prompt("product_report", content)
+
+
+def test_suffix_normalization(service: PromptService) -> None:
+    service.update_prompt("product_report.txt", "custom")
+    assert service.get_prompt("product_report") == "custom"
+    assert service.is_overridden("product_report.txt") is True
+    service.reset_prompt("product_report")
+    assert service.get_prompt("product_report.txt") == "default"
+
+
+def test_is_overridden_initially_false(service: PromptService) -> None:
+    assert service.is_overridden("product_report") is False
+
+
+def test_is_overridden_unknown_raises(service: PromptService) -> None:
+    with pytest.raises(KeyError):
+        service.is_overridden("unknown")
+
+
+def test_prompt_meta_attribute_and_dict_access() -> None:
+    meta = PromptMeta(
+        name="test",
+        label="测试",
+        description="测试描述",
+        variables=["a", "b"],
+        is_overridden=False,
+    )
+    assert meta.name == "test"
+    assert meta["label"] == "测试"
+    assert meta["variables"] == ["a", "b"]
+    with pytest.raises(KeyError):
+        _ = meta["unknown"]
