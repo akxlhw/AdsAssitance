@@ -20,9 +20,20 @@ from coupangads.core.logging import get_logger
 from coupangads.infra.api_keys import read_api_key
 from coupangads.infra.io import write_text_file
 from coupangads.orchestration.pipeline import ProductPipeline
+from coupangads.text.prompt_service import PromptService
 from coupangads.text.template_loader import TemplateLoader
 
 router = APIRouter(prefix="/api")
+
+_prompt_service: PromptService | None = None
+
+
+def get_prompt_service() -> PromptService:
+    global _prompt_service
+    if _prompt_service is None:
+        templates = _load_templates()
+        _prompt_service = PromptService(templates)
+    return _prompt_service
 
 
 class GenerationAborted(Exception):
