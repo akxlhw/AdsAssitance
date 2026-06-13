@@ -94,6 +94,18 @@ async def get_result(product_id: str):
     return {"product_id": safe_id, "text_files": text_files, "images": images}
 
 
+@router.get("/result/{product_id}/{filename}")
+async def serve_result_file(product_id: str, filename: str):
+    """提供结果文件预览。"""
+    safe_id = _safe_name(product_id)
+    safe_filename = _safe_name(filename)
+    output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, safe_id)
+    file_path = output_dir / safe_filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path)
+
+
 @router.get("/download/{product_id}")
 async def download_product(product_id: str):
     """下载 ZIP 资产包。"""
