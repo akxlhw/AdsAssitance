@@ -8,24 +8,63 @@ const PROMPT_MENU_ORDER = [
 ];
 
 export class PromptStudio {
-  constructor() {
-    this.modal = document.getElementById('prompt-modal');
-    this.menuEl = document.getElementById('prompt-menu');
-    this.nameEl = document.getElementById('prompt-editor-name');
-    this.descEl = document.getElementById('prompt-editor-desc');
-    this.textareaEl = document.getElementById('prompt-editor-textarea');
-    this.varsEl = document.getElementById('prompt-editor-vars');
-    this.toastEl = document.getElementById('prompt-toast');
+  constructor(options = {}) {
+    this.mode = options.mode || 'modal';
+    this.container = options.container || null;
+    this.onToggle = options.onToggle || null;
 
     this.prompts = [];
     this.currentName = null;
     this.originalContent = '';
 
+    this._buildDom();
     this._bindEvents();
   }
 
+  _buildDom() {
+    if (this.mode === 'modal') {
+      this.modal = document.getElementById('prompt-modal');
+      this.menuEl = document.getElementById('prompt-menu');
+      this.nameEl = document.getElementById('prompt-editor-name');
+      this.descEl = document.getElementById('prompt-editor-desc');
+      this.textareaEl = document.getElementById('prompt-editor-textarea');
+      this.varsEl = document.getElementById('prompt-editor-vars');
+      this.toastEl = document.getElementById('prompt-toast');
+    } else if (this.mode === 'inline' && this.container) {
+      this.container.innerHTML = `
+        <div class="prompt-panel__header">
+          <h2 class="prompt-panel__title">⚙️ Prompt Studio</h2>
+          <button class="prompt-panel__toggle" type="button" aria-label="收起">›</button>
+        </div>
+        <div class="prompt-panel__body">
+          <nav class="prompt-menu"></nav>
+          <div class="prompt-editor">
+            <div class="prompt-editor__meta">
+              <div class="prompt-editor__name"></div>
+              <div class="prompt-editor__desc"></div>
+            </div>
+            <textarea class="prompt-editor__textarea" spellcheck="false"></textarea>
+            <div class="prompt-editor__vars"></div>
+            <div class="prompt-editor__actions">
+              <button class="btn-ghost prompt-reset" type="button">恢复默认</button>
+              <button class="btn-primary prompt-save" type="button">保存</button>
+            </div>
+          </div>
+        </div>
+      `;
+      this.menuEl = this.container.querySelector('.prompt-menu');
+      this.nameEl = this.container.querySelector('.prompt-editor__name');
+      this.descEl = this.container.querySelector('.prompt-editor__desc');
+      this.textareaEl = this.container.querySelector('.prompt-editor__textarea');
+      this.varsEl = this.container.querySelector('.prompt-editor__vars');
+      this.toastEl = document.getElementById('prompt-toast');
+    }
+  }
+
   async open() {
-    this.modal.classList.add('is-open');
+    if (this.mode === 'modal') {
+      this.modal.classList.add('is-open');
+    }
     await this._loadPrompts();
     if (!this.currentName && this.prompts.length) {
       this._select(this.prompts[0].name);
@@ -33,20 +72,25 @@ export class PromptStudio {
   }
 
   close() {
-    this.modal.classList.remove('is-open');
+    if (this.mode === 'modal') {
+      this.modal.classList.remove('is-open');
+    }
   }
 
   _bindEvents() {
-    document.getElementById('prompt-modal-close').addEventListener('click', () => this.close());
-    this.modal.addEventListener('click', (e) => {
-      if (e.target === this.modal || e.target.classList.contains('prompt-backdrop')) {
-        this.close();
-      }
-    });
-
-    document.getElementById('prompt-save').addEventListener('click', () => this._save());
-    document.getElementById('prompt-reset').addEventListener('click', () => this._reset());
-    document.getElementById('prompt-cancel').addEventListener('click', () => this.close());
+    if (this.mode === 'modal') {
+      document.getElementById('prompt-modal-close').addEventListener('click', () => this.close());
+      this.modal.addEventListener('click', (e) => {
+        if (e.target === this.modal || e.target.classList.contains('prompt-backdrop')) {
+          this.close();
+        }
+      });
+      document.getElementById('prompt-cancel').addEventListener('click', () => this.close());
+    } else if (this.mode === 'inline') {
+      this.container.querySelector('.prompt-panel__toggle').addEventListener('click', () => {
+        if (this.onToggle) this.onToggle();
+      });
+    }
 
     this.menuEl.addEventListener('click', (e) => {
       const item = e.target.closest('.prompt-menu__item');
@@ -61,6 +105,16 @@ export class PromptStudio {
         this._insertText(tag.dataset.var);
       }
     });
+
+    const saveBtn = this.mode === 'modal'
+      ? document.getElementById('prompt-save')
+      : this.container.querySelector('.prompt-save');
+    saveBtn.addEventListener('click', () => this._save());
+
+    const resetBtn = this.mode === 'modal'
+      ? document.getElementById('prompt-reset')
+      : this.container.querySelector('.prompt-reset');
+    resetBtn.addEventListener('click', () => this._reset());
   }
 
   _insertText(text) {
@@ -80,7 +134,6 @@ export class PromptStudio {
       return;
     }
     const data = await res.json();
-    // 按 PROMPT_MENU_ORDER 排序，仅保留后端返回的 prompt
     const orderMap = new Map(PROMPT_MENU_ORDER.map((m, i) => [m.name, i]));
     this.prompts = data
       .filter((p) => orderMap.has(p.name))
@@ -161,6 +214,7 @@ export class PromptStudio {
   }
 
   _showToast(message) {
+    if (!this.toastEl) return;
     this.toastEl.textContent = message;
     this.toastEl.classList.add('is-visible');
     setTimeout(() => this.toastEl.classList.remove('is-visible'), 2000);

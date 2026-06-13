@@ -231,3 +231,25 @@
     white-space: nowrap;
   }
 }
+
+
+/* Inline Prompt Studio panel (inside home view) */
+.home-prompt-panel .prompt-panel__header {
+  padding: 16px 18px;
+}
+
+.prompt-panel__toggle {
+  background: none;
+  border: none;
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--text-muted, #888888);
+  padding: 4px 8px;
+  transform: rotate(0deg);
+  transition: color 0.2s;
+}
+
+.prompt-panel__toggle:hover {
+  color: var(--text, #111111);
+}

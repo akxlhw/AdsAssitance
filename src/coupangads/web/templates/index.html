@@ -32,11 +32,15 @@
     </header>
 
     <div id="home-view" class="home-view hidden">
-      <div class="home-header">
-        <h2 class="home-header__title">工作台</h2>
-      </div>
-      <div id="home-filters" class="home-filters"></div>
-      <div id="product-grid" class="product-grid"></div>
+      <aside class="home-sidebar">
+        <div class="home-sidebar__header">
+          <h2 class="home-sidebar__title">商品</h2>
+          <button id="home-create-btn" class="btn-primary home-sidebar__create" type="button" title="新建商品">+</button>
+        </div>
+        <div id="home-product-list" class="home-product-list"></div>
+      </aside>
+      <main id="home-canvas" class="home-canvas"></main>
+      <aside id="home-prompt-panel" class="home-prompt-panel"></aside>
     </div>
 
     <div id="upload-state" class="state view-section hidden">
