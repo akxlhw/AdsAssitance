@@ -20,6 +20,7 @@ DEFAULT_INPUT_DIR = Path("raw-material")
 DEFAULT_OUTPUT_DIR = Path("result")
 GEMINI_API_KEY_FILE = Path("apikey.md")
 DOUBAO_API_KEY_FILE = Path("dbkey.md")
+PROVIDER_CONFIG_FILE = Path("config/provider.json")
 
 # 输出文件名
 PRODUCT_REPORT_FILE = "productreport.md"

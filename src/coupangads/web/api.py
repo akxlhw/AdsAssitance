@@ -1,6 +1,8 @@
 """Web API 路由。"""
 
 import asyncio
+import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -15,23 +17,30 @@ router = APIRouter(prefix="/api")
 _task_states: dict[str, dict] = {}
 
 
+def _safe_name(name: str) -> str:
+    """移除危险字符，仅保留字母、数字、下划线、连字符和点。"""
+    return re.sub(r"[^a-zA-Z0-9_\-\.]", "_", name)
+
+
 @router.post("/upload")
 async def upload_product(
     product_name: str = Form(...),
     files: list[UploadFile] = File(...),
 ):
     """上传产品图。"""
-    product_dir = config.DEFAULT_INPUT_DIR / product_name
+    safe_product = _safe_name(product_name)
+    product_dir = config.DEFAULT_INPUT_DIR / safe_product
     product_dir.mkdir(parents=True, exist_ok=True)
 
     saved = []
     for file in files:
-        target = product_dir / file.filename
+        safe_filename = _safe_name(file.filename or "unnamed")
+        target = product_dir / safe_filename
         content = await file.read()
         target.write_bytes(content)
-        saved.append(file.filename)
+        saved.append(safe_filename)
 
-    return {"product_id": product_name, "file_count": len(saved)}
+    return {"product_id": safe_product, "file_count": len(saved)}
 
 
 @router.post("/generate/{product_id}")
@@ -50,7 +59,7 @@ async def progress_stream(product_id: str):
     async def event_generator():
         while True:
             state = _task_states.get(product_id, {"progress": 0, "status": "unknown"})
-            yield f"data: {state}\n\n"
+            yield f"data: {json.dumps(state)}\n\n"
             if state.get("status") in ("completed", "error"):
                 break
             await asyncio.sleep(1)
@@ -61,20 +70,25 @@ async def progress_stream(product_id: str):
 @router.get("/result/{product_id}")
 async def get_result(product_id: str):
     """获取结果文件列表。"""
-    output_dir = config.DEFAULT_OUTPUT_DIR / product_id
+    safe_id = _safe_name(product_id)
+    output_dir = config.DEFAULT_OUTPUT_DIR / safe_id
     if not output_dir.exists():
         raise HTTPException(status_code=404, detail="Output not found")
 
     text_files = [p.name for p in output_dir.glob("*.md") if p.name != config.RUN_LOG_FILE]
     images = [p.name for p in output_dir.glob("*.png")]
-    return {"product_id": product_id, "text_files": text_files, "images": images}
+    return {"product_id": safe_id, "text_files": text_files, "images": images}
 
 
 @router.get("/download/{product_id}")
 async def download_product(product_id: str):
     """下载 ZIP 资产包。"""
-    output_dir = config.DEFAULT_OUTPUT_DIR / product_id
-    zip_path = output_dir / f"{product_id}.zip"
+    safe_id = _safe_name(product_id)
+    output_dir = config.DEFAULT_OUTPUT_DIR / safe_id
+    if not output_dir.exists():
+        raise HTTPException(status_code=404, detail="Output not found")
+
+    zip_path = output_dir / f"{safe_id}.zip"
 
     with zipfile.ZipFile(zip_path, "w") as zf:
         for file in output_dir.iterdir():
@@ -89,10 +103,17 @@ async def get_config():
     """获取 API 配置状态（不返回完整密钥）。"""
     gemini_path = config.GEMINI_API_KEY_FILE
     doubao_path = config.DOUBAO_API_KEY_FILE
+    provider = "gemini"
+    if config.PROVIDER_CONFIG_FILE.exists():
+        try:
+            data = json.loads(config.PROVIDER_CONFIG_FILE.read_text(encoding="utf-8"))
+            provider = data.get("default_provider", "gemini")
+        except Exception:
+            pass
     return {
         "gemini_configured": gemini_path.exists() and gemini_path.read_text().strip() != "",
         "doubao_configured": doubao_path.exists() and doubao_path.read_text().strip() != "",
-        "default_provider": "gemini",
+        "default_provider": provider,
     }
 
 
@@ -101,6 +122,7 @@ async def update_config(payload: dict):
     """更新 API 密钥与默认线路。"""
     gemini_key = payload.get("gemini_api_key", "").strip()
     doubao_key = payload.get("doubao_api_key", "").strip()
+    provider = payload.get("default_provider", "gemini").strip()
 
     if gemini_key:
         from coupangads.infra.io import write_text_file
@@ -108,5 +130,10 @@ async def update_config(payload: dict):
     if doubao_key:
         from coupangads.infra.io import write_text_file
         write_text_file(config.DOUBAO_API_KEY_FILE, doubao_key + "\n")
+
+    write_text_file(
+        config.PROVIDER_CONFIG_FILE,
+        json.dumps({"default_provider": provider}, ensure_ascii=False, indent=2),
+    )
 
     return {"status": "saved"}

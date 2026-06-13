@@ -1,8 +1,12 @@
 export async function initConfigPanel() {
-  const btn = document.getElementById('config-btn');
   const modal = document.getElementById('config-modal');
+  if (!modal) return;
+  const cleanModal = modal.cloneNode(true);
+  modal.parentNode.replaceChild(cleanModal, modal);
+
+  const btn = document.getElementById('config-btn');
   const form = document.getElementById('config-form');
-  if (!btn || !modal || !form) return;
+  if (!btn || !form) return;
 
   const statusRes = await fetch('/api/config');
   const status = await statusRes.json();
