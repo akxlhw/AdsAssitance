@@ -68,4 +68,27 @@ CoupangAds 是一套专为韩国 Coupang 电商平台设计的 **AI 内容生产
 
 ---
 
+## 快速开始
+
+### Web UI（推荐）
+
+```bash
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -e ".[dev]"
+
+echo "YOUR_GEMINI_API_KEY" > apikey.md
+
+python -m coupangads.web.app
+# 打开 http://localhost:8000
+```
+
+### CLI
+
+```bash
+python -m coupangads.cli.full_pipeline --limit-folder "产品文件夹名"
+```
+
+---
+
 *© 2025 CoupangAds. 保留所有权利。*
