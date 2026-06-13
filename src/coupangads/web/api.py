@@ -182,9 +182,30 @@ def _write_status_file(product_id: str, state: dict) -> None:
 def _run_pipeline(product_id: str, enabled_steps: set[str] | None = None) -> None:
     """在后台线程中运行产品流水线。"""
 
+    from datetime import datetime, timezone
+
+    completed_steps: set[str] = set()
+    created_at = datetime.now(timezone.utc).isoformat()
+
     def update_progress(data: dict) -> None:
-        _task_states[product_id] = data
-        _write_status_file(product_id, data)
+        nonlocal completed_steps
+        step = data.get("step")
+        status = data.get("status")
+        if step and status == "completed":
+            completed_steps.add(step)
+        elif step and status in ("started", "running", "pending"):
+            completed_steps.discard(step)
+
+        state = {
+            **data,
+            "completed_steps": sorted(completed_steps),
+            "created_at": created_at,
+        }
+        if status in ("completed", "aborted", "error"):
+            state["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+        _task_states[product_id] = state
+        _write_status_file(product_id, state)
 
     update_progress({"status": "pending", "progress": 0, "message": "任务排队中"})
     _clear_abort_flag(product_id)
