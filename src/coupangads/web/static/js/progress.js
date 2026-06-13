@@ -1,3 +1,5 @@
+import { initPreview } from './preview.js';
+
 const STEPS = [
   { key: 'product_report', label: '商品画像', message: '正在分析商品画像...' },
   { key: 'title', label: '标题', message: '正在生成商品标题...' },
@@ -9,12 +11,29 @@ const STEPS = [
 
 const ANIMATION_DURATION = 600;
 
-let _cachedFiles = [];
-let _lastStep = null;
+let _cachedSteps = [];
 let _currentNumberAnimation = null;
 
+function getStepForFile(name) {
+  if (name === 'productreport.md') return 'product_report';
+  if (name === 'product_title.md') return 'title';
+  if (name === 'wing_keywords.md') return 'keywords';
+  if (name.startsWith('selling_points')) return 'selling_points';
+  if (name === 'instagram.md') return 'instagram';
+  if (name.endsWith('.png')) return 'images';
+  return null;
+}
+
+function getRepresentativeFile(files, step) {
+  if (step === 'images') {
+    return files.find(f => f.type === 'image') || files[0];
+  }
+  return files.find(f => f.name.endsWith('.md')) || files[0];
+}
+
 async function syncPreviewBar(productId) {
-  const res = await fetch(`/api/result/${encodeURIComponent(productId)}`, { cache: 'no-store' });
+  const safeProductId = encodeURIComponent(productId);
+  const res = await fetch(`/api/result/${safeProductId}`, { cache: 'no-store' });
   if (!res.ok) return;
   const data = await res.json();
   const textFiles = data.text_files || [];
@@ -24,19 +43,27 @@ async function syncPreviewBar(productId) {
     ...images.map(name => ({ name, type: 'image' })),
   ];
 
-  const newFiles = allFiles.filter(
-    f => !_cachedFiles.some(c => c.name === f.name && c.type === f.type)
-  );
+  const filesByStep = {};
+  for (const file of allFiles) {
+    const step = getStepForFile(file.name);
+    if (!step) continue;
+    if (!filesByStep[step]) filesByStep[step] = [];
+    filesByStep[step].push(file);
+  }
 
-  if (newFiles.length > 0) {
-    _cachedFiles = allFiles;
-    renderPreviewCards(productId, newFiles, allFiles);
+  const completedSteps = Object.keys(filesByStep);
+  const newSteps = completedSteps.filter(s => !_cachedSteps.includes(s));
+
+  if (newSteps.length > 0) {
+    _cachedSteps = completedSteps;
+    renderPreviewCards(productId, newSteps, filesByStep);
   }
 }
 
 export function startProgress(productId, selectedSteps) {
-  _cachedFiles = [];
-  _lastStep = null;
+  _cachedSteps = [];
+  initPreview();
+
   const previewBar = document.getElementById('progress-preview-bar');
   if (previewBar) previewBar.innerHTML = '';
 
@@ -65,13 +92,9 @@ export function startProgress(productId, selectedSteps) {
     updateSteps(data, steps);
     updateMessage(data, steps);
 
-    const shouldSync = data.step !== _lastStep || data.status === 'completed';
-    if (shouldSync) {
-      _lastStep = data.step;
-      syncPreviewBar(productId).catch(err => {
-        console.error('[progress] preview sync failed:', err);
-      });
-    }
+    syncPreviewBar(productId).catch(err => {
+      console.error('[progress] preview sync failed:', err);
+    });
 
     if (data.status === 'error') {
       console.log('[progress] SSE error, closing');
@@ -89,7 +112,7 @@ export function startProgress(productId, selectedSteps) {
         }).catch(err => {
           console.error('[progress] failed to load gallery:', err);
         });
-      }, 300);
+      }, 500);
     }
   };
 
@@ -197,21 +220,27 @@ function showState(id) {
   target.classList.add('state-transition');
 }
 
-function renderPreviewCards(productId, newFiles, allFiles) {
+function renderPreviewCards(productId, newSteps, filesByStep) {
   const container = document.getElementById('progress-preview-bar');
   if (!container) return;
 
   const safeProductId = encodeURIComponent(productId);
   const fragment = document.createDocumentFragment();
-  for (const file of newFiles) {
+
+  for (const step of newSteps) {
+    const files = filesByStep[step];
+    const file = getRepresentativeFile(files, step);
+    const stepLabel = STEPS.find(s => s.key === step)?.label || step;
+
     const card = document.createElement('div');
-    card.className = file.type === 'image'
+    card.className = step === 'images'
       ? 'progress-preview-card progress-preview-card--image'
       : 'progress-preview-card';
+    card.dataset.step = step;
     card.dataset.name = file.name;
     card.dataset.type = file.type;
 
-    if (file.type === 'image') {
+    if (step === 'images') {
       card.innerHTML = `
         <img class="progress-preview-card__image"
              src="/api/result/${safeProductId}/${encodeURIComponent(file.name)}"
@@ -220,23 +249,17 @@ function renderPreviewCards(productId, newFiles, allFiles) {
       `;
     } else {
       card.innerHTML = `
-        <div class="progress-preview-card__name">${escapeHtml(file.name)}</div>
-        <div class="progress-preview-card__preview">加载中...</div>
+        <div class="progress-preview-card__name">${escapeHtml(stepLabel)}</div>
       `;
       loadTextPreview(productId, file.name, card);
     }
 
     card.addEventListener('click', () => {
+      const url = `/api/result/${safeProductId}/${encodeURIComponent(file.name)}`;
       if (file.type === 'image') {
-        window.previewImage(
-          `/api/result/${safeProductId}/${encodeURIComponent(file.name)}`,
-          file.name
-        );
+        window.previewImage(url, file.name);
       } else {
-        window.previewText(
-          `/api/result/${safeProductId}/${encodeURIComponent(file.name)}`,
-          file.name
-        );
+        window.previewText(url, file.name);
       }
     });
 
@@ -255,11 +278,14 @@ async function loadTextPreview(productId, name, card) {
     });
     if (!res.ok) return;
     const text = await res.text();
-    const previewEl = card.querySelector('.progress-preview-card__preview');
-    if (previewEl) {
-      const clean = text.replace(/[#*_`\-]/g, ' ').replace(/\s+/g, ' ').trim();
-      previewEl.textContent = clean.slice(0, 80) || '（空文件）';
+    let previewEl = card.querySelector('.progress-preview-card__preview');
+    if (!previewEl) {
+      previewEl = document.createElement('div');
+      previewEl.className = 'progress-preview-card__preview';
+      card.appendChild(previewEl);
     }
+    const clean = text.replace(/[#*_`\-]/g, ' ').replace(/\s+/g, ' ').trim();
+    previewEl.textContent = clean.slice(0, 80) || '（空文件）';
   } catch (err) {
     console.error('[progress] failed to load text preview:', err);
   }
