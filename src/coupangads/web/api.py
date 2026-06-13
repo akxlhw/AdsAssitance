@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
 from coupangads.adapters.doubao import DoubaoClientAdapter
 from coupangads.adapters.gemini import GeminiClientAdapter
@@ -38,6 +39,12 @@ def get_prompt_service() -> PromptService:
 
 class GenerationAborted(Exception):
     """用户主动中止生成。"""
+
+
+class PromptUpdateRequest(BaseModel):
+    """Prompt 更新请求体。"""
+
+    content: str
 
 
 # 内存中的任务状态（MVP 简版，v2.0 迁移到数据库）
@@ -497,20 +504,27 @@ async def get_prompt(name: str):
         is_overridden = service.is_overridden(name)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Prompt not found: {name}")
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"Template file not found: {name}"
+        )
     return {"name": name, "content": content, "is_overridden": is_overridden}
 
 
 @router.put("/prompts/{name}")
-async def update_prompt(name: str, payload: dict):
+async def update_prompt(name: str, payload: PromptUpdateRequest):
     """更新指定 prompt（写入覆盖层）。"""
     service = get_prompt_service()
-    content = payload.get("content", "")
     try:
-        service.update_prompt(name, content)
+        service.update_prompt(name, payload.content)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Prompt not found: {name}")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        logger = get_logger("api.prompts")
+        logger.error(f"持久化 prompt 覆盖失败: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to persist prompt override")
     return {"status": "saved", "name": name}
 
 
@@ -522,4 +536,8 @@ async def reset_prompt(name: str):
         service.reset_prompt(name)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Prompt not found: {name}")
+    except OSError as exc:
+        logger = get_logger("api.prompts")
+        logger.error(f"持久化 prompt 覆盖失败: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to persist prompt override")
     return {"status": "reset", "name": name}

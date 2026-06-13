@@ -61,3 +61,30 @@ def test_update_and_reset_prompt() -> None:
 def test_update_unknown_prompt() -> None:
     response = client.put("/api/prompts/unknown.txt", json={"content": "x"})
     assert response.status_code == 404
+
+
+def test_get_unknown_prompt() -> None:
+    response = client.get("/api/prompts/unknown.txt")
+    assert response.status_code == 404
+
+
+def test_update_prompt_empty_content() -> None:
+    response = client.put("/api/prompts/product_report.txt", json={"content": ""})
+    assert response.status_code == 400
+
+    response = client.put(
+        "/api/prompts/product_report.txt", json={"content": "   "}
+    )
+    assert response.status_code == 400
+
+
+def test_delete_unknown_prompt() -> None:
+    response = client.delete("/api/prompts/unknown.txt")
+    assert response.status_code == 404
+
+
+def test_get_prompt_missing_template_file() -> None:
+    """已注册但默认模板文件缺失时返回 404。"""
+    response = client.get("/api/prompts/product_title.txt")
+    assert response.status_code == 404
+    assert "Template file not found" in response.json()["detail"]
