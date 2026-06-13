@@ -470,3 +470,56 @@ async def update_config(payload: dict):
     )
 
     return {"status": "saved"}
+
+
+@router.get("/prompts")
+async def list_prompts():
+    """列出所有可编辑 prompt 的元信息。"""
+    service = get_prompt_service()
+    return [
+        {
+            "name": p.name,
+            "label": p.label,
+            "description": p.description,
+            "variables": p.variables,
+            "is_overridden": p.is_overridden,
+        }
+        for p in service.list_prompts()
+    ]
+
+
+@router.get("/prompts/{name}")
+async def get_prompt(name: str):
+    """获取指定 prompt 的当前生效内容。"""
+    service = get_prompt_service()
+    try:
+        content = service.get_prompt(name)
+        is_overridden = service.is_overridden(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Prompt not found: {name}")
+    return {"name": name, "content": content, "is_overridden": is_overridden}
+
+
+@router.put("/prompts/{name}")
+async def update_prompt(name: str, payload: dict):
+    """更新指定 prompt（写入覆盖层）。"""
+    service = get_prompt_service()
+    content = payload.get("content", "")
+    try:
+        service.update_prompt(name, content)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Prompt not found: {name}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "saved", "name": name}
+
+
+@router.delete("/prompts/{name}")
+async def reset_prompt(name: str):
+    """重置指定 prompt 为默认模板。"""
+    service = get_prompt_service()
+    try:
+        service.reset_prompt(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Prompt not found: {name}")
+    return {"status": "reset", "name": name}
