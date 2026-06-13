@@ -479,6 +479,75 @@ async def update_config(payload: dict):
     return {"status": "saved"}
 
 
+def _scan_products() -> list[dict]:
+    """扫描 output 目录生成商品卡片列表。"""
+    products = []
+    output_dir = config.DEFAULT_OUTPUT_DIR
+    if not output_dir.exists():
+        return products
+
+    for product_dir in sorted(output_dir.iterdir()):
+        if not product_dir.is_dir():
+            continue
+        product_id = product_dir.name
+        status_path = product_dir / ".status.json"
+        status = "draft"
+        progress = [False, False, False, False, False]
+        message = "无任务记录"
+        created_at = None
+        completed_at = None
+
+        if status_path.exists():
+            try:
+                data = json.loads(status_path.read_text(encoding="utf-8"))
+                status = data.get("status", "draft")
+                message = data.get("message", message)
+                completed_steps = data.get("completed_steps", [])
+                # 映射到 5 个 UI 进度点：report, title, keywords, selling_points, images
+                step_map = {
+                    "product_report": 0,
+                    "title": 1,
+                    "keywords": 2,
+                    "selling_points": 3,
+                    "images": 4,
+                }
+                for step, idx in step_map.items():
+                    progress[idx] = step in completed_steps or status in ("completed", "aborted")
+                created_at = data.get("created_at")
+                completed_at = data.get("completed_at")
+            except Exception:
+                pass
+
+        text_count = len([p for p in product_dir.glob("*.md") if p.name != config.RUN_LOG_FILE])
+        images = sorted(product_dir.glob("*.png"))
+        image_count = len(images)
+        thumbnail = None
+        if images:
+            thumbnail = f"/api/result/{product_id}/{images[0].name}"
+
+        products.append(
+            {
+                "product_id": product_id,
+                "name": product_id,
+                "status": status,
+                "message": message,
+                "created_at": created_at,
+                "completed_at": completed_at,
+                "progress": progress,
+                "text_count": text_count,
+                "image_count": image_count,
+                "thumbnail": thumbnail,
+            }
+        )
+    return products
+
+
+@router.get("/products")
+async def list_products():
+    """返回商品卡片列表。"""
+    return {"products": _scan_products()}
+
+
 @router.get("/prompts")
 async def list_prompts():
     """列出所有可编辑 prompt 的元信息。"""
