@@ -108,3 +108,93 @@ def test_update_prompt_persistence_failure(monkeypatch) -> None:
         assert "持久化 Prompt 覆盖失败" in response.json()["detail"]
     finally:
         monkeypatch.setattr(loader, "_persist_overrides", original_persist)
+
+
+def test_history_snapshot_on_update() -> None:
+    """二次 PUT 应在 history 目录留下前一次覆盖的快照。"""
+    # 第一次 PUT（无当前覆盖 → 不留快照）
+    r = client.put(
+        "/api/prompts/product_report.txt",
+        json={"content": "v1"},
+    )
+    assert r.status_code == 200
+    assert client.get("/api/prompts/product_report.txt/history").json() == []
+
+    # 第二次 PUT（v1 → v2，应快照 v1）
+    r = client.put(
+        "/api/prompts/product_report.txt",
+        json={"content": "v2"},
+    )
+    assert r.status_code == 200
+    history = client.get("/api/prompts/product_report.txt/history").json()
+    assert len(history) == 1
+    snapshot = history[0]
+    assert snapshot["size"] == 2  # "v1"
+
+    # 读取快照内容
+    r = client.get(
+        f"/api/prompts/product_report.txt/history/{snapshot['id']}"
+    )
+    assert r.status_code == 200
+    assert r.json()["content"] == "v1"
+
+
+def test_history_restore() -> None:
+    """restore 应把快照内容写回当前覆盖，并把当前覆盖另存为新快照。"""
+    client.put("/api/prompts/product_report.txt", json={"content": "v1"})
+    client.put("/api/prompts/product_report.txt", json={"content": "v2"})
+    history = client.get("/api/prompts/product_report.txt/history").json()
+    snapshot_id = history[0]["id"]
+
+    r = client.post(
+        f"/api/prompts/product_report.txt/history/{snapshot_id}/restore"
+    )
+    assert r.status_code == 200
+    # 当前覆盖应回到 v1
+    assert client.get("/api/prompts/product_report.txt").json()["content"] == "v1"
+    # v2 应作为新快照出现
+    new_history = client.get("/api/prompts/product_report.txt/history").json()
+    assert len(new_history) == 2
+
+
+def test_history_not_found() -> None:
+    """未知快照返回 404。"""
+    client.put("/api/prompts/product_report.txt", json={"content": "x"})
+    r = client.post("/api/prompts/product_report.txt/history/nonexistent/restore")
+    assert r.status_code == 404
+
+
+def test_history_unknown_prompt() -> None:
+    """未知 prompt 调用 history 接口返回 404。"""
+    assert client.get("/api/prompts/unknown.txt/history").status_code == 404
+
+
+def test_preview_image_prompt(tmp_path) -> None:
+    """image_prompt.txt 的 preview 返回渲染后的样本。"""
+    # 准备模板文件
+    templates_dir = api.get_prompt_service()._loader.templates_dir
+    (templates_dir / "image_prompt.txt").write_text(
+        "STYLE={style_rules} CTX={product_context} SCREEN={screen} "
+        "BLOCK={block} CONTENT={block_content}",
+        encoding="utf-8",
+    )
+    (templates_dir / "image_global_constraints.txt").write_text(
+        "GLOBAL", encoding="utf-8"
+    )
+    (templates_dir / "style_rules.txt").write_text(
+        "## A 风格\n红色\n## B 风格\n蓝色", encoding="utf-8"
+    )
+    api.get_prompt_service.cache_clear()
+
+    r = client.post("/api/prompts/image_prompt.txt/preview", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert "rendered" in body
+    # 没有产品数据时仍能渲染出样本
+    assert "STYLE=" in body["rendered"]
+
+
+def test_preview_unknown_prompt() -> None:
+    """未知 prompt 的 preview 返回 404。"""
+    r = client.post("/api/prompts/unknown.txt/preview", json={})
+    assert r.status_code == 404

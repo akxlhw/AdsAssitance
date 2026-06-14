@@ -51,6 +51,10 @@ def _build_mock_pipeline_class():
                 self.progress_callback(
                     {"step": "title", "status": "completed", "progress": 30, "message": "标题完成"}
                 )
+                # 真实流水线最后会推送一次整体完成的进度
+                self.progress_callback(
+                    {"step": "title", "status": "completed", "progress": 100, "message": "全部完成"}
+                )
 
     return MockPipeline
 

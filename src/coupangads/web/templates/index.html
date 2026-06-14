@@ -22,85 +22,32 @@
   </div>
 
   <div class="container">
-    <header>
-      <a href="/" style="text-decoration: none; color: inherit;"><h1>CoupangAds</h1></a>
-      <div class="header-controls">
-        <button id="config-btn" class="icon-button" title="API 配置" aria-label="API 配置">⚙️</button>
-        <button id="prompt-studio-btn" class="btn-ghost" type="button">Prompt Studio</button>
-        <button id="header-create-btn" class="btn-primary" type="button">+ 新建商品</button>
-      </div>
-    </header>
-
-    <div id="home-view" class="home-view hidden">
-      <aside class="home-sidebar">
-        <div class="home-sidebar__header">
-          <h2 class="home-sidebar__title">商品</h2>
-          <button id="home-create-btn" class="btn-primary home-sidebar__create" type="button" title="新建商品">+</button>
+    <div id="workspace-view" class="workspace-view">
+      <aside class="workspace-sidebar">
+        <div class="workspace-sidebar__header">
+          <a href="/" class="workspace-sidebar__logo" aria-label="CoupangAds">
+            <svg class="workspace-sidebar__logo-icon" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+              <rect x="10" y="10" width="100" height="100" rx="28" fill="#111111"/>
+              <path d="M84 38C84 38 56 30 40 48C24 66 36 88 56 88C72 88 82 76 84 72" stroke="white" stroke-width="10" stroke-linecap="round" fill="none"/>
+              <circle cx="88" cy="60" r="8" fill="#FF5A5A"/>
+            </svg>
+            <span class="workspace-sidebar__logo-text">CoupangAds</span>
+          </a>
+          <div class="workspace-sidebar__actions">
+            <button id="config-btn" class="icon-button" title="API 配置" aria-label="API 配置">⚙️</button>
+            <button id="workspace-create-btn" class="btn-primary workspace-sidebar__create" type="button" title="新建商品">+</button>
+          </div>
         </div>
-        <div id="home-product-list" class="home-product-list"></div>
+        <div id="workspace-product-list" class="workspace-product-list"></div>
       </aside>
-      <main id="home-canvas" class="home-canvas"></main>
-      <aside id="home-prompt-panel" class="home-prompt-panel"></aside>
-    </div>
-
-    <div id="upload-state" class="state view-section hidden">
-      <label>
-        产品名称
-        <input type="text" id="product-name" placeholder="例如：dog-harness-001" value="">
-      </label>
-      <div class="upload-zone" id="upload-zone">
-        <div class="upload-icon">📁</div>
-        <h2>拖拽产品图到这里</h2>
-        <p class="subtitle">支持 JPG / PNG / HEIC / WEBP，建议 3-10 张</p>
-        <input type="file" id="file-input" multiple accept="image/*" hidden>
-      </div>
-      <div class="thumbnail-grid" id="thumbnail-grid"></div>
-
-      <div class="step-options">
-        <div class="step-options-header">
-          <h3>生成选项</h3>
-          <button type="button" id="toggle-steps" class="link-button">取消全选</button>
+      <main id="workspace-canvas" class="workspace-canvas">
+        <div class="workspace-canvas__toolbar">
+          <div class="workspace-canvas__toolbar-title" id="workspace-canvas-toolbar-title"></div>
+          <div class="workspace-canvas__toolbar-actions" id="workspace-canvas-toolbar-actions"></div>
         </div>
-        <label class="step-option"><input type="checkbox" value="product_report" checked> 商品画像</label>
-        <label class="step-option"><input type="checkbox" value="title" checked> 标题</label>
-        <label class="step-option"><input type="checkbox" value="keywords" checked> 关键词</label>
-        <label class="step-option"><input type="checkbox" value="selling_points" checked> 卖点文案</label>
-        <label class="step-option"><input type="checkbox" value="instagram" checked> INS 文案</label>
-        <label class="step-option"><input type="checkbox" value="images" checked> 详情页图片</label>
-      </div>
-
-      <button id="start-btn" class="primary-button">开始生成</button>
-    </div>
-
-    <div id="progress-state" class="state view-section hidden">
-      <div class="progress-container">
-        <div class="progress-percentage" id="progress-percent">0%</div>
-        <div class="progress-message" id="progress-message">
-          <span id="progress-message-text">准备中...</span>
-          <button id="abort-link" class="abort-link" type="button">中止</button>
-          <span id="abort-error" class="abort-error hidden"></span>
-        </div>
-        <div class="progress-bar-track progress-bar-track--minimal">
-          <div class="progress-bar-fill" id="progress-bar"></div>
-          <div class="progress-bar-shimmer" id="progress-bar-shimmer"></div>
-        </div>
-        <div class="aborted-state hidden" id="aborted-state">
-          <p class="aborted-state__message">生成已中止</p>
-          <a id="view-results-btn" class="primary-button" href="#">查看已生成结果</a>
-        </div>
-        <div class="progress-preview-bar" id="progress-preview-bar"></div>
-        <div class="progress-steps" id="steps"></div>
-      </div>
-    </div>
-
-    <div id="result-state" class="state view-section hidden">
-      <h2>生成结果</h2>
-      <div id="text-cards" class="text-cards"></div>
-      <div id="image-gallery" class="image-gallery"></div>
-      <div class="result-actions">
-        <button id="refresh-result" class="secondary-button">刷新结果</button>
-        <a id="download-btn" class="primary-button" download>下载全部资产</a>
-      </div>
+        <div id="workspace-canvas-content" class="workspace-canvas__content"></div>
+      </main>
+      <aside id="workspace-prompt-panel" class="workspace-prompt-panel"></aside>
     </div>
   </div>
 
@@ -190,31 +137,6 @@
     </div>
   </div>
 
-  <div id="prompt-modal" class="prompt-modal">
-    <div class="prompt-backdrop"></div>
-    <div class="prompt-panel">
-      <div class="prompt-panel__header">
-        <h2 class="prompt-panel__title">⚙️ Prompt Studio</h2>
-        <button id="prompt-modal-close" class="prompt-panel__close" aria-label="关闭">&times;</button>
-      </div>
-      <div class="prompt-panel__body">
-        <nav id="prompt-menu" class="prompt-menu"></nav>
-        <div class="prompt-editor">
-          <div class="prompt-editor__meta">
-            <div id="prompt-editor-name" class="prompt-editor__name"></div>
-            <div id="prompt-editor-desc" class="prompt-editor__desc"></div>
-          </div>
-          <textarea id="prompt-editor-textarea" class="prompt-editor__textarea" spellcheck="false"></textarea>
-          <div id="prompt-editor-vars" class="prompt-editor__vars"></div>
-          <div class="prompt-editor__actions">
-            <button id="prompt-reset" class="btn-ghost" type="button">恢复默认</button>
-            <button id="prompt-cancel" class="btn-ghost" type="button">取消</button>
-            <button id="prompt-save" class="btn-primary" type="button">保存</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
   <div id="prompt-toast" class="prompt-toast"></div>
 
   <script type="module" src="/static/js/main.js"></script>

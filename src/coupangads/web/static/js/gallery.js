@@ -1,163 +1,168 @@
+/**
+ * 结果视图：渲染进 canvas 容器。
+ *
+ * 导出：
+ *   renderResultWorkspace(container, productId, prefetchedData, { onRefresh }) -> cleanup
+ *   loadResult(productId, selectedSteps, prefetchedData) - 兼容旧入口
+ */
+
 import { initPreview } from './preview.js';
 
 let _currentProductId = null;
 let _pollTimer = null;
-const STATUS_POLL_INTERVAL = 2000;   // 状态轮询 2 秒
-const STATUS_MAX_POLLS = 300;        // 状态轮询最多 10 分钟
+const STATUS_POLL_INTERVAL = 2000;
+const STATUS_MAX_POLLS = 300;
 
-export async function loadResult(productId, selectedSteps, prefetchedData = null) {
-  console.log('[gallery] loadResult called', productId, selectedSteps, prefetchedData);
+const RESULT_HTML = `
+  <div class="result-workspace">
+    <h2>生成结果</h2>
+    <div class="result-summary" data-el="summary"></div>
+    <div class="polling-status" data-el="polling"></div>
+    <div class="text-cards" data-el="text-cards"></div>
+    <div class="image-gallery" data-el="image-gallery"></div>
+    <div class="result-actions">
+      <button class="secondary-button" data-el="refresh">刷新结果</button>
+      <a class="primary-button" data-el="download" download>下载全部资产</a>
+    </div>
+  </div>
+`;
+
+/**
+ * @param {HTMLElement} container
+ * @param {string} productId
+ * @param {object|null} prefetchedData
+ * @param {object} callbacks { onRefresh }
+ * @returns {() => void} cleanup
+ */
+export function renderResultWorkspace(container, productId, prefetchedData = null, callbacks = {}) {
   _currentProductId = productId;
   if (_pollTimer) clearTimeout(_pollTimer);
-  showState('result-state');
 
-  // 正常流程：SSE 已经把结果文件列表带过来了，直接渲染
-  if (prefetchedData &&
-      (prefetchedData.status === 'completed' || prefetchedData.status === 'aborted') &&
-      (prefetchedData.text_files || prefetchedData.images)) {
-    console.log('[gallery] rendering from prefetched SSE data');
-    setPollingStatus(prefetchedData.status === 'aborted' ? '生成已中止' : '生成已完成');
-    await renderFromData(productId, selectedSteps, prefetchedData);
-    return;
-  }
+  container.innerHTML = RESULT_HTML;
+  initPreview();
 
-  setPollingStatus('正在获取任务状态...');
+  const refreshBtn = container.querySelector('[data-el="refresh"]');
+  refreshBtn?.addEventListener('click', () => {
+    if (_pollTimer) clearTimeout(_pollTimer);
+    fetchAndRender(container, productId, callbacks);
+  });
 
-  try {
-    const state = await fetchStatus(productId);
-    console.log('[gallery] initial status:', state);
-
-    if (state.status === 'completed') {
-      setPollingStatus('生成已完成，正在加载结果...');
-      await renderFromData(productId, selectedSteps, state);
+  // 主流程
+  (async () => {
+    if (prefetchedData &&
+        (prefetchedData.status === 'completed' || prefetchedData.status === 'aborted') &&
+        (prefetchedData.text_files || prefetchedData.images)) {
+      setPollingStatus(container, prefetchedData.status === 'aborted' ? '生成已中止' : '生成已完成');
+      await renderFromData(container, productId, prefetchedData);
       return;
     }
 
-    if (state.status === 'aborted') {
-      setPollingStatus('生成已中止，正在加载已生成结果...');
-      await fetchAndRender(productId, selectedSteps);
-      return;
+    setPollingStatus(container, '正在获取任务状态...');
+    try {
+      const state = await fetchStatus(productId);
+      if (state.status === 'completed') {
+        setPollingStatus(container, '生成已完成，正在加载结果...');
+        await renderFromData(container, productId, state);
+        return;
+      }
+      if (state.status === 'aborted') {
+        setPollingStatus(container, '生成已中止，正在加载已生成结果...');
+        await fetchAndRender(container, productId, callbacks);
+        return;
+      }
+      if (state.status === 'error') {
+        setPollingStatus(container, '生成失败：' + (state.message || '未知错误'));
+        return;
+      }
+      setPollingStatus(container, '生成中... ' + (state.message || ''));
+      await pollStatus(container, productId, callbacks, 0);
+    } catch (err) {
+      setPollingStatus(container, '获取状态失败：' + err.message);
     }
+  })();
 
-    if (state.status === 'error') {
-      alert('生成失败：' + (state.message || '未知错误'));
-      return;
-    }
-
-    // 页面刷新后任务还在进行中，轮询状态
-    setPollingStatus('生成中... ' + (state.message || ''));
-    await pollStatus(productId, selectedSteps, 0);
-  } catch (err) {
-    setPollingStatus('获取状态失败：' + err.message);
-  }
+  return () => {
+    if (_pollTimer) clearTimeout(_pollTimer);
+    _pollTimer = null;
+  };
 }
 
 async function fetchStatus(productId) {
-  console.log('[gallery] fetching status for', productId);
   const res = await fetch(`/api/status/${productId}`, { cache: 'no-store' });
-  console.log('[gallery] status response', res.status);
   if (!res.ok) throw new Error('status ' + res.status);
   return res.json();
 }
 
-async function pollStatus(productId, selectedSteps, attempt) {
+async function pollStatus(container, productId, callbacks, attempt) {
   if (attempt > STATUS_MAX_POLLS) {
-    setPollingStatus('等待任务状态超时，请稍后手动刷新');
+    setPollingStatus(container, '等待任务状态超时，请稍后手动刷新');
     return;
   }
-
   try {
     const state = await fetchStatus(productId);
-    console.log('[gallery] status:', state);
-
     if (state.status === 'completed') {
-      setPollingStatus('生成已完成，正在加载结果...');
-      await renderFromData(productId, selectedSteps, state);
+      setPollingStatus(container, '生成已完成，正在加载结果...');
+      await renderFromData(container, productId, state);
       return;
     }
-
     if (state.status === 'aborted') {
-      setPollingStatus('生成已中止，正在加载已生成结果...');
-      await fetchAndRender(productId, selectedSteps);
+      setPollingStatus(container, '生成已中止，正在加载已生成结果...');
+      await fetchAndRender(container, productId, callbacks);
       return;
     }
-
     if (state.status === 'error') {
-      alert('生成失败：' + (state.message || '未知错误'));
+      setPollingStatus(container, '生成失败：' + (state.message || '未知错误'));
       return;
     }
-
     setPollingStatus(
-      state.status === 'unknown'
-        ? '任务状态未知，继续等待...'
-        : `生成中... ${state.message || ''}`
+      container,
+      state.status === 'unknown' ? '任务状态未知，继续等待...' : `生成中... ${state.message || ''}`,
     );
     _pollTimer = setTimeout(
-      () => pollStatus(productId, selectedSteps, attempt + 1),
-      STATUS_POLL_INTERVAL
+      () => pollStatus(container, productId, callbacks, attempt + 1),
+      STATUS_POLL_INTERVAL,
     );
   } catch (err) {
-    setPollingStatus('轮询异常：' + err.message);
+    setPollingStatus(container, '轮询异常：' + err.message);
     _pollTimer = setTimeout(
-      () => pollStatus(productId, selectedSteps, attempt + 1),
-      5000
+      () => pollStatus(container, productId, callbacks, attempt + 1),
+      5000,
     );
   }
 }
 
-async function renderFromData(productId, selectedSteps, data) {
-  console.log('[gallery] renderFromData', data);
-  initPreview();
-  renderSummary((data.text_files || []).length, (data.images || []).length);
-  renderTextCards(data.text_files || [], productId);
-  renderImageGallery(data.images || [], productId);
-  setupDownload(productId);
-  setupRefresh(productId, selectedSteps);
-  setPollingStatus('结果加载完成');
-  console.log('[gallery] render done');
+async function renderFromData(container, productId, data) {
+  renderSummary(container, (data.text_files || []).length, (data.images || []).length);
+  renderTextCards(container, data.text_files || [], productId);
+  renderImageGallery(container, data.images || [], productId);
+  setupDownload(container, productId);
+  setPollingStatus(container, '结果加载完成');
 }
 
-async function fetchAndRender(productId, selectedSteps) {
-  console.log('[gallery] fetching result for', productId);
+async function fetchAndRender(container, productId, callbacks) {
   const res = await fetch(`/api/result/${productId}`, { cache: 'no-store' });
-  console.log('[gallery] result response', res.status);
   if (!res.ok) {
-    setPollingStatus('获取结果失败');
+    setPollingStatus(container, '获取结果失败');
     return;
   }
   const data = await res.json();
-  console.log('[gallery] result data:', data);
-  await renderFromData(productId, selectedSteps, data);
+  await renderFromData(container, productId, data);
 }
 
-function renderSummary(textCount, imageCount) {
-  let summary = document.getElementById('result-summary');
-  if (!summary) {
-    summary = document.createElement('div');
-    summary.id = 'result-summary';
-    summary.className = 'result-summary';
-    const heading = document.querySelector('#result-state h2');
-    heading?.parentNode.insertBefore(summary, heading.nextSibling);
-  }
-  summary.textContent = `共 ${textCount} 个文本文件，${imageCount} 张图片`;
+function renderSummary(container, textCount, imageCount) {
+  const el = container.querySelector('[data-el="summary"]');
+  if (el) el.textContent = `共 ${textCount} 个文本文件，${imageCount} 张图片`;
 }
 
-function setPollingStatus(message) {
-  let status = document.getElementById('polling-status');
-  if (!status) {
-    status = document.createElement('div');
-    status.id = 'polling-status';
-    status.className = 'polling-status';
-    const summary = document.getElementById('result-summary');
-    summary?.parentNode.insertBefore(status, summary.nextSibling);
-  }
-  status.textContent = message;
+function setPollingStatus(container, message) {
+  const el = container.querySelector('[data-el="polling"]');
+  if (el) el.textContent = message;
 }
 
-function renderTextCards(files, productId) {
-  const container = document.getElementById('text-cards');
-  console.log('[gallery] renderTextCards container=', !!container, 'files=', files.length, files);
-  container.innerHTML = files.map(name => `
+function renderTextCards(container, files, productId) {
+  const cardsEl = container.querySelector('[data-el="text-cards"]');
+  if (!cardsEl) return;
+  cardsEl.innerHTML = files.map(name => `
     <div class="card" data-name="${escapeHtml(name)}">
       <h3>${escapeHtml(name)}</h3>
       <div class="card-actions">
@@ -167,24 +172,24 @@ function renderTextCards(files, productId) {
     </div>
   `).join('');
 
-  container.querySelectorAll('.preview-text-btn').forEach(btn => {
+  cardsEl.querySelectorAll('.preview-text-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       window.previewText(btn.dataset.url, btn.dataset.name);
     });
   });
 }
 
-function renderImageGallery(images, productId) {
-  const container = document.getElementById('image-gallery');
-  console.log('[gallery] renderImageGallery container=', !!container, 'images=', images.length);
-  container.innerHTML = images.map(name => `
+function renderImageGallery(container, images, productId) {
+  const galleryEl = container.querySelector('[data-el="image-gallery"]');
+  if (!galleryEl) return;
+  galleryEl.innerHTML = images.map(name => `
     <div class="result-image-card" data-name="${escapeHtml(name)}">
       <img src="/api/result/${productId}/${encodeURIComponent(name)}" alt="${escapeHtml(name)}" loading="lazy">
       <span>${escapeHtml(name)}</span>
     </div>
   `).join('');
 
-  container.querySelectorAll('.result-image-card').forEach(card => {
+  galleryEl.querySelectorAll('.result-image-card').forEach(card => {
     const name = card.dataset.name;
     const url = card.querySelector('img')?.src;
     card.addEventListener('click', () => {
@@ -193,33 +198,25 @@ function renderImageGallery(images, productId) {
   });
 }
 
-function setupDownload(productId) {
-  const btn = document.getElementById('download-btn');
+function setupDownload(container, productId) {
+  const btn = container.querySelector('[data-el="download"]');
+  if (!btn) return;
   btn.href = `/api/download/${productId}`;
   btn.download = `${productId}.zip`;
 }
 
-function setupRefresh(productId, selectedSteps) {
-  const btn = document.getElementById('refresh-result');
-  if (!btn) return;
-  const newBtn = btn.cloneNode(true);
-  btn.parentNode.replaceChild(newBtn, btn);
-  newBtn.addEventListener('click', () => {
-    if (_pollTimer) clearTimeout(_pollTimer);
-    fetchAndRender(productId, selectedSteps);
-  });
-}
-
-function showState(id) {
-  document.querySelectorAll('.state').forEach(el => el.classList.add('hidden'));
-  document.getElementById(id).classList.remove('hidden');
-}
-
 function escapeHtml(str) {
-  return str
+  return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+// 兼容旧入口：loadResult
+export async function loadResult(productId, selectedSteps, prefetchedData = null) {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  return renderResultWorkspace(container, productId, prefetchedData);
 }

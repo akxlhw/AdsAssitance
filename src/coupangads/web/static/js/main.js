@@ -1,77 +1,67 @@
 import { initConfigPanel } from './config.js';
-import { initUpload } from './upload.js';
-import { startProgress, renderAbortedState } from './progress.js';
-import { HomeWorkbench } from './home.js';
-import { PromptStudio } from './prompt-studio.js';
+import { initPreview } from './preview.js';
+import { Workspace } from './workspace.js';
 
-const views = {
-  home: document.getElementById('home-view'),
-  upload: document.getElementById('upload-state'),
-  progress: document.getElementById('progress-state'),
-  result: document.getElementById('result-state'),
-};
+const workspace = new Workspace();
 
-function hideAllViews() {
-  Object.values(views).forEach((el) => el?.classList.add('hidden'));
-}
+// 把外部行为注入 workspace
+workspace.onCreate = () => navigateToCreate();
+workspace.onEdit = (productId) => navigateToEdit(productId);
+workspace.onOpenProduct = (productId) => navigateToProgress(productId);
 
-function showView(name) {
-  hideAllViews();
-  views[name]?.classList.remove('hidden');
-}
-
-function navigateToHome() {
+function navigateToHome(selectProductId = null) {
   window.history.replaceState({}, '', '/');
-  showView('home');
-  homeWorkbench.mount();
+  workspace.mount();
+  if (selectProductId) {
+    workspace.selectProduct(selectProductId, 'assets');
+  } else if (!workspace.selectedProductId) {
+    workspace.setMode('empty');
+  }
 }
 
 function navigateToCreate() {
   window.history.pushState({}, '', '/create');
-  homeWorkbench.unmount();
-  showView('upload');
-  initUpload((pid, steps) => navigateToProgress(pid, steps));
+  workspace.mount();
+  workspace.setMode('create');
+}
+
+function navigateToEdit(productId) {
+  window.history.pushState({}, '', `/edit/${encodeURIComponent(productId)}`);
+  workspace.mount();
+  workspace.setMode('edit', { productId });
 }
 
 async function navigateToProgress(productId, steps = null) {
   window.history.pushState({}, '', `/progress/${encodeURIComponent(productId)}`);
-  homeWorkbench.unmount();
-  showView('progress');
+  workspace.mount();
+  // 优先用现有 status 决定进入 progress 还是 result
   try {
     const res = await fetch(`/api/status/${encodeURIComponent(productId)}`, { cache: 'no-store' });
     const data = await res.json();
-    if (data.status === 'aborted') {
-      renderAbortedState(productId, data);
-    } else if (data.status === 'completed') {
-      navigateToResult(productId);
+    if (data.status === 'completed') {
+      workspace.setMode('result', { productId });
+    } else if (data.status === 'aborted') {
+      workspace.setMode('result', { productId });
     } else {
-      startProgress(productId, steps || data.steps || []);
+      workspace.setMode('progress', { productId, steps });
     }
   } catch (err) {
     console.error('[main] failed to resume status:', err);
-    navigateToHome();
+    workspace.setMode('progress', { productId, steps });
   }
 }
 
-async function navigateToResult(productId) {
-  window.history.pushState({}, '', `/result/${encodeURIComponent(productId)}`);
-  homeWorkbench.unmount();
-  showView('result');
-  const { loadResult } = await import('./gallery.js');
-  await loadResult(productId);
-}
-
-const homeWorkbench = new HomeWorkbench(
-  () => navigateToCreate(),
-  (productId) => navigateToProgress(productId)
-);
-const promptStudio = new PromptStudio();
-
 document.addEventListener('DOMContentLoaded', () => {
   initConfigPanel();
+  initPreview();
 
-  document.getElementById('prompt-studio-btn')?.addEventListener('click', () => promptStudio.open());
-  document.getElementById('header-create-btn')?.addEventListener('click', () => navigateToCreate());
+  // 全局：当 Prompt Studio 有未保存改动时，刷新/关闭页面也拦截
+  window.addEventListener('beforeunload', (e) => {
+    if (workspace.promptStudio?.isDirty && workspace.promptStudio.isDirty()) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 
   window.addEventListener('popstate', () => {
     resolveRoute();
@@ -85,13 +75,20 @@ function resolveRoute() {
 
   const resultMatch = path.match(/^\/result\/([^/]+)\/?$/);
   if (resultMatch) {
-    navigateToResult(decodeURIComponent(resultMatch[1]));
+    workspace.mount();
+    workspace.setMode('result', { productId: decodeURIComponent(resultMatch[1]) });
     return;
   }
 
   const progressMatch = path.match(/^\/progress\/([^/]+)\/?$/);
   if (progressMatch) {
     navigateToProgress(decodeURIComponent(progressMatch[1]));
+    return;
+  }
+
+  const editMatch = path.match(/^\/edit\/([^/]+)\/?$/);
+  if (editMatch) {
+    navigateToEdit(decodeURIComponent(editMatch[1]));
     return;
   }
 
@@ -109,3 +106,6 @@ function resolveRoute() {
 
   navigateToHome();
 }
+
+// 暴露给浏览器调试用
+window.__workspace = workspace;

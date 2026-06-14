@@ -1,20 +1,71 @@
-"""离线 mock 适配器，用于无 API 额度时的开发和 UI 测试。"""
+"""离线 mock 适配器，用于无 API 额度时的开发和 UI 测试。
+
+可通过环境变量模拟真实 API 行为：
+- COUPANGADS_MOCK_IMAGE_DELAY：每张图等待秒数（默认 0）
+- COUPANGADS_MOCK_TEXT_DELAY：每个文本步骤等待秒数（默认 0）
+- COUPANGADS_MOCK_IMAGE_FAIL_RATE：随机失败率 0~1（默认 0）
+- COUPANGADS_MOCK_IMAGE_HANG_RATE：随机卡死率 0~1（默认 0）
+  卡死模式会等待远超 pipeline 超时的时长，用于触发 timeout 路径
+"""
 
 import hashlib
+import os
+import random
+import time
 from pathlib import Path
 from typing import Iterable
 
 from PIL import Image, ImageDraw, ImageFont
 
 from coupangads.adapters.base import ImageAdapter, TextAdapter
+from coupangads.core import config
 from coupangads.core.models import ImagePrompt, ReferenceImage
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _chunked_sleep(total_sec: float, chunk: float = 0.5) -> None:
+    """按 chunk 切片 sleep，避免单次长 sleep 阻塞线程池回收。
+
+    hang 模式下也用这个：pipeline 层的 timeout 会在 worker thread 外
+    通过 fut.result(timeout=...) 放弃等待，本线程睡多久都不阻塞主流程。
+    """
+    if total_sec <= 0:
+        return
+    remaining = total_sec
+    while remaining > 0:
+        step = min(chunk, remaining)
+        time.sleep(step)
+        remaining -= step
 
 
 class MockTextAdapter(TextAdapter):
     """返回确定性占位文本，不调用任何真实 API。"""
 
+    def __init__(self, delay_sec: float | None = None) -> None:
+        # delay_sec 显式入参优先；否则读环境变量；最后回退到 config 默认
+        self.delay_sec = (
+            delay_sec if delay_sec is not None
+            else _env_float("COUPANGADS_MOCK_TEXT_DELAY", config.MOCK_TEXT_DELAY_SEC)
+        )
+
+    def _simulate_latency(self) -> None:
+        """模拟文本 API 延迟，按 0.5s 步进以便 abort 能尽快响应。"""
+        if self.delay_sec <= 0:
+            return
+        _chunked_sleep(self.delay_sec, chunk=0.5)
+
     def chat(self, prompt: str) -> str:
         """根据 prompt 类型返回固定模板内容。"""
+        self._simulate_latency()
         prompt_lower = prompt.lower()
         if "标题" in prompt or "title" in prompt_lower:
             return self._fake_title(prompt)
@@ -28,6 +79,7 @@ class MockTextAdapter(TextAdapter):
 
     def chat_with_images(self, prompt: str, image_paths: list[Path]) -> str:
         """返回伪造的商品画像报告。"""
+        self._simulate_latency()
         count = len(image_paths)
         return f"""# 商品画像报告（Mock）
 
@@ -167,13 +219,53 @@ class MockImageAdapter(ImageAdapter):
         "B": (200, 160, 120),
     }
 
+    def __init__(
+        self,
+        delay_sec: float | None = None,
+        fail_rate: float | None = None,
+        hang_rate: float | None = None,
+        rng: random.Random | None = None,
+    ) -> None:
+        self.delay_sec = (
+            delay_sec if delay_sec is not None
+            else _env_float("COUPANGADS_MOCK_IMAGE_DELAY", config.MOCK_IMAGE_DELAY_SEC)
+        )
+        self.fail_rate = (
+            fail_rate if fail_rate is not None
+            else _env_float("COUPANGADS_MOCK_IMAGE_FAIL_RATE", config.MOCK_IMAGE_FAIL_RATE)
+        )
+        self.hang_rate = (
+            hang_rate if hang_rate is not None
+            else _env_float("COUPANGADS_MOCK_IMAGE_HANG_RATE", config.MOCK_IMAGE_HANG_RATE)
+        )
+        # 稳定 rng 便于复现；外部可注入
+        self._rng = rng or random.Random()
+
     def generate_image(
         self,
         prompt: str,
         references: list[ReferenceImage],
         output_path: Path,
     ) -> bool:
-        """绘制一张 2:3 占位图并保存。"""
+        """绘制一张 2:3 占位图并保存。
+
+        行为由 __init__ 参数 / 环境变量控制：
+        - delay_sec：每张图等待时间
+        - fail_rate：随机失败概率（返回 False）
+        - hang_rate：随机卡死概率（睡 1 小时，让 pipeline 超时接管）
+        """
+        # 卡死分支：用远超 pipeline 超时的睡眠模拟无响应
+        if self.hang_rate > 0 and self._rng.random() < self.hang_rate:
+            _chunked_sleep(3600, chunk=1.0)
+            raise TimeoutError(f"Mock hang triggered for {output_path.name}")
+
+        # 正常延迟：按 chunk 切，让 abort_callback 有机会介入
+        _chunked_sleep(self.delay_sec, chunk=0.5)
+
+        # 随机失败
+        if self.fail_rate > 0 and self._rng.random() < self.fail_rate:
+            raise RuntimeError(f"Mock random failure for {output_path.name}")
+
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # 默认 2:3 比例，与配置一致

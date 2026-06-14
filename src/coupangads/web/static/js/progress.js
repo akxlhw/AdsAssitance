@@ -1,3 +1,11 @@
+/**
+ * 进度视图：渲染进 canvas 容器，SSE 推送进度。
+ *
+ * 导出：
+ *   renderProgressWorkspace(container, productId, steps, { onCompleted, onAbortedView }) -> cleanup
+ *   renderAbortedState(productId, data) - 保留兼容（不再切换视图，仅用于极少数异常路径）
+ */
+
 import { initPreview } from './preview.js';
 
 const STEPS = [
@@ -11,6 +19,28 @@ const STEPS = [
 
 const ANIMATION_DURATION = 600;
 
+const PROGRESS_HTML = `
+  <div class="progress-container">
+    <div class="progress-percentage" data-el="percent">0%</div>
+    <div class="progress-message" data-el="message">
+      <span data-el="message-text">准备中...</span>
+      <button class="abort-link" type="button" data-el="abort">中止</button>
+      <span class="abort-error hidden" data-el="abort-error"></span>
+    </div>
+    <div class="progress-bar-track progress-bar-track--minimal">
+      <div class="progress-bar-fill" data-el="bar"></div>
+      <div class="progress-bar-shimmer" data-el="shimmer"></div>
+    </div>
+    <div class="aborted-state hidden" data-el="aborted">
+      <p class="aborted-state__message">生成已中止</p>
+      <a class="primary-button" href="#" data-el="view-results">查看已生成结果</a>
+    </div>
+    <div class="progress-preview-bar" data-el="preview"></div>
+    <div class="progress-steps" data-el="steps"></div>
+  </div>
+`;
+
+// 模块级状态（与原 progress.js 一致，用于跨函数共享）
 let _cachedSteps = [];
 let _currentNumberAnimation = null;
 let _currentProductId = null;
@@ -19,6 +49,8 @@ let _abortRequested = false;
 let _isCompleted = false;
 let _evtSource = null;
 let _lastProgress = 0;
+// 当前容器引用（renderProgressWorkspace 设置）
+let _container = null;
 
 function getStepForFile(name) {
   if (name === 'productreport.md') return 'product_report';
@@ -38,6 +70,7 @@ function getRepresentativeFile(files, step) {
 }
 
 async function syncPreviewBar(productId) {
+  if (!_container) return;
   const safeProductId = encodeURIComponent(productId);
   const res = await fetch(`/api/result/${safeProductId}`, { cache: 'no-store' });
   if (!res.ok) return;
@@ -66,54 +99,10 @@ async function syncPreviewBar(productId) {
   }
 }
 
-function updateUrlProductId(productId) {
-  const url = new URL(window.location.href);
-  url.searchParams.set('product_id', productId);
-  window.history.replaceState({}, '', url);
-}
-
-function clearUrlProductId() {
-  const url = new URL(window.location.href);
-  url.searchParams.delete('product_id');
-  window.history.replaceState({}, '', url);
-}
-
-function getAbortLink() {
-  return document.getElementById('abort-link');
-}
-
-function getAbortError() {
-  return document.getElementById('abort-error');
-}
-
-function getAbortedState() {
-  return document.getElementById('aborted-state');
-}
-
-function getProgressBar() {
-  return document.getElementById('progress-bar');
-}
-
-function getProgressMessage() {
-  return document.getElementById('progress-message');
-}
-
-function getProgressMessageText() {
-  return document.getElementById('progress-message-text');
-}
-
-function getProgressPercent() {
-  return document.getElementById('progress-percent');
-}
-
-function getProgressShimmer() {
-  return document.getElementById('progress-bar-shimmer');
-}
-
 function resetAbortUI() {
-  const link = getAbortLink();
-  const error = getAbortError();
-  const abortedState = getAbortedState();
+  const link = _container?.querySelector('[data-el="abort"]');
+  const error = _container?.querySelector('[data-el="abort-error"]');
+  const abortedState = _container?.querySelector('[data-el="aborted"]');
   if (link) {
     link.disabled = false;
     link.textContent = '中止';
@@ -127,14 +116,14 @@ function resetAbortUI() {
 }
 
 function showAbortError(message) {
-  const error = getAbortError();
+  const error = _container?.querySelector('[data-el="abort-error"]');
   if (!error) return;
   error.textContent = message;
   error.classList.remove('hidden');
 }
 
 function setAbortLoading(loading) {
-  const link = getAbortLink();
+  const link = _container?.querySelector('[data-el="abort"]');
   if (!link) return;
   link.disabled = loading;
   link.textContent = loading ? '正在中止...' : '中止';
@@ -142,7 +131,7 @@ function setAbortLoading(loading) {
 }
 
 function setViewResultsHref(productId) {
-  const btn = document.getElementById('view-results-btn');
+  const btn = _container?.querySelector('[data-el="view-results"]');
   if (btn) {
     btn.href = `/result/${encodeURIComponent(productId)}`;
   }
@@ -169,7 +158,7 @@ async function requestAbort(productId) {
 }
 
 function stopProgressAnimation() {
-  const shimmer = getProgressShimmer();
+  const shimmer = _container?.querySelector('[data-el="shimmer"]');
   if (shimmer) {
     shimmer.style.animation = 'none';
     shimmer.style.opacity = '0';
@@ -177,87 +166,72 @@ function stopProgressAnimation() {
 }
 
 function showAbortedState(productId, data) {
+  if (!_container) return;
   stopProgressAnimation();
 
-  const messageTextEl = getProgressMessageText();
+  const messageTextEl = _container.querySelector('[data-el="message-text"]');
   if (messageTextEl) messageTextEl.textContent = '生成已中止';
 
   const progress = data?.progress ?? _lastProgress;
   updateProgress({ progress });
 
-  const link = getAbortLink();
+  const link = _container.querySelector('[data-el="abort"]');
   if (link) link.classList.add('hidden');
 
   setViewResultsHref(productId);
-  const abortedState = getAbortedState();
+  const abortedState = _container.querySelector('[data-el="aborted"]');
   if (abortedState) abortedState.classList.remove('hidden');
 }
 
-function handleAborted(productId, data) {
-  // 如果已经正常完成，忽略迟到的 aborted 事件
+function handleAborted(productId, data, callbacks) {
   if (_isCompleted) return;
-
   if (_evtSource) {
     _evtSource.close();
     _evtSource = null;
   }
-
   showAbortedState(productId, data);
-}
-
-export function renderAbortedState(productId, data = {}) {
-  initPreview();
-
-  const previewBar = document.getElementById('progress-preview-bar');
-  if (previewBar) {
-    previewBar.innerHTML = '';
-    enableDragScroll(previewBar);
+  if (callbacks?.onAbortedView) {
+    setTimeout(() => callbacks.onAbortedView(productId), 800);
   }
-
-  showState('progress-state');
-  const steps = STEPS;
-  renderSteps(steps);
-
-  _currentProductId = productId;
-  _currentSteps = steps;
-  _isCompleted = false;
-  _abortRequested = true;
-
-  resetAbortUI();
-  showAbortedState(productId, data);
-  syncPreviewBar(productId).catch(err => {
-    console.error('[progress] preview sync failed:', err);
-  });
 }
 
-export function startProgress(productId, selectedSteps) {
+/**
+ * @param {HTMLElement} container
+ * @param {string} productId
+ * @param {string[]|null} selectedSteps
+ * @param {object} callbacks { onCompleted(pid, data), onAbortedView(pid) }
+ * @returns {() => void} cleanup
+ */
+export async function renderProgressWorkspace(container, productId, selectedSteps, callbacks = {}) {
+  _container = container;
   _cachedSteps = [];
   _currentProductId = productId;
-  _currentSteps = selectedSteps;
+  _currentSteps = selectedSteps || [];
   _abortRequested = false;
   _isCompleted = false;
   initPreview();
 
-  const previewBar = document.getElementById('progress-preview-bar');
+  container.innerHTML = PROGRESS_HTML;
+
+  const previewBar = container.querySelector('[data-el="preview"]');
   if (previewBar) {
     previewBar.innerHTML = '';
     enableDragScroll(previewBar);
   }
 
-  showState('progress-state');
-  updateUrlProductId(productId);
   resetAbortUI();
 
   const steps = selectedSteps && selectedSteps.length
     ? STEPS.filter(s => selectedSteps.includes(s.key))
     : STEPS;
+
   renderSteps(steps);
 
   const safeProductId = encodeURIComponent(productId);
   const evtSource = new EventSource(`/api/progress/${safeProductId}`);
   _evtSource = evtSource;
 
-  const abortLink = getAbortLink();
+  const abortLink = container.querySelector('[data-el="abort"]');
   if (abortLink) {
     abortLink.onclick = () => requestAbort(productId);
   }
@@ -270,8 +244,7 @@ export function startProgress(productId, selectedSteps) {
       console.error('[progress] failed to parse aborted event:', err);
       return;
     }
-    console.log('[progress] SSE aborted event:', data);
-    handleAborted(productId, data);
+    handleAborted(productId, data, callbacks);
   });
 
   evtSource.onmessage = (event) => {
@@ -286,11 +259,8 @@ export function startProgress(productId, selectedSteps) {
       return;
     }
 
-    console.log('[progress] SSE message:', data);
-
-    // 后端未发送命名事件时的降级处理
     if (data.status === 'aborted') {
-      handleAborted(productId, data);
+      handleAborted(productId, data, callbacks);
       return;
     }
 
@@ -303,7 +273,6 @@ export function startProgress(productId, selectedSteps) {
     });
 
     if (data.status === 'error') {
-      console.log('[progress] SSE error, closing');
       evtSource.close();
       _evtSource = null;
       showError(data.message || '未知错误');
@@ -311,17 +280,11 @@ export function startProgress(productId, selectedSteps) {
     }
 
     if (data.status === 'completed' && data.progress === 100) {
-      console.log('[progress] SSE final completed, closing');
       _isCompleted = true;
       evtSource.close();
       _evtSource = null;
-      clearUrlProductId();
       setTimeout(() => {
-        import('./gallery.js').then(m => {
-          m.loadResult(productId, selectedSteps, data);
-        }).catch(err => {
-          console.error('[progress] failed to load gallery:', err);
-        });
+        if (callbacks.onCompleted) callbacks.onCompleted(productId, data);
       }, 500);
     }
   };
@@ -332,17 +295,26 @@ export function startProgress(productId, selectedSteps) {
     evtSource.close();
     _evtSource = null;
 
-    const link = getAbortLink();
+    const link = container.querySelector('[data-el="abort"]');
     if (link && link.disabled && link.textContent === '正在中止...') {
       setAbortLoading(false);
       _abortRequested = false;
     }
   };
+
+  return () => {
+    if (_evtSource) {
+      _evtSource.close();
+      _evtSource = null;
+    }
+    _container = null;
+  };
 }
 
 function updateProgress(data) {
-  const bar = getProgressBar();
-  const percentEl = getProgressPercent();
+  if (!_container) return;
+  const bar = _container.querySelector('[data-el="bar"]');
+  const percentEl = _container.querySelector('[data-el="percent"]');
   if (!bar || !percentEl) return;
 
   const target = data.progress || 0;
@@ -376,8 +348,9 @@ function animateNumber(element, from, to, duration) {
 }
 
 function updateMessage(data, steps) {
-  const messageEl = getProgressMessage();
-  const messageTextEl = getProgressMessageText();
+  if (!_container) return;
+  const messageEl = _container.querySelector('[data-el="message"]');
+  const messageTextEl = _container.querySelector('[data-el="message-text"]');
   if (!messageEl || !messageTextEl) return;
 
   const activeStep = steps.find(s => s.key === data.step);
@@ -398,7 +371,8 @@ function updateMessage(data, steps) {
 }
 
 function renderSteps(steps) {
-  const container = document.getElementById('steps');
+  if (!_container) return;
+  const container = _container.querySelector('[data-el="steps"]');
   if (!container) return;
   container.innerHTML = steps.map(s => `
     <span class="progress-step" data-step="${s.key}">${s.label}</span>
@@ -406,10 +380,11 @@ function renderSteps(steps) {
 }
 
 function updateSteps(data, steps) {
+  if (!_container) return;
   const activeKeys = new Set(steps.map(s => s.key));
   const stepIndex = steps.findIndex(s => s.key === data.step);
 
-  document.querySelectorAll('.progress-step').forEach(el => {
+  _container.querySelectorAll('.progress-step').forEach(el => {
     const key = el.dataset.step;
     const index = steps.findIndex(s => s.key === key);
     el.classList.remove('is-done', 'is-active');
@@ -425,27 +400,16 @@ function updateSteps(data, steps) {
 }
 
 function showError(message) {
-  const messageTextEl = getProgressMessageText();
-  const bar = getProgressBar();
+  if (!_container) return;
+  const messageTextEl = _container.querySelector('[data-el="message-text"]');
+  const bar = _container.querySelector('[data-el="bar"]');
   if (messageTextEl) messageTextEl.textContent = `生成失败：${message}`;
   if (bar) bar.style.background = 'var(--error, #ff3b30)';
 }
 
-function showState(id) {
-  document.querySelectorAll('.state').forEach(el => {
-    el.classList.add('hidden');
-    el.classList.remove('state-transition');
-  });
-  const target = document.getElementById(id);
-  if (!target) return;
-  target.classList.remove('hidden');
-  // Trigger reflow for transition
-  void target.offsetWidth;
-  target.classList.add('state-transition');
-}
-
 function renderPreviewCards(productId, newSteps, filesByStep) {
-  const container = document.getElementById('progress-preview-bar');
+  if (!_container) return;
+  const container = _container.querySelector('[data-el="preview"]');
   if (!container) return;
 
   const safeProductId = encodeURIComponent(productId);
@@ -491,7 +455,6 @@ function renderPreviewCards(productId, newSteps, filesByStep) {
   }
 
   container.appendChild(fragment);
-  // Scroll to the newest card
   container.scrollLeft = container.scrollWidth;
 }
 
@@ -516,7 +479,7 @@ async function loadTextPreview(productId, name, card) {
 }
 
 function escapeHtml(str) {
-  return str
+  return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -554,7 +517,6 @@ function enableDragScroll(container) {
     container.scrollLeft = scrollLeft - walk;
   });
 
-  // Touch support
   container.addEventListener('touchstart', (e) => {
     isDown = true;
     startX = e.touches[0].pageX - container.offsetLeft;
@@ -571,4 +533,18 @@ function enableDragScroll(container) {
     const walk = (x - startX) * 1.5;
     container.scrollLeft = scrollLeft - walk;
   }, { passive: true });
+}
+
+// 兼容旧入口：极少使用，仅当某些路径仍调用 startProgress 时
+export function startProgress(productId, selectedSteps) {
+  // 简化版：渲染到 body 临时容器（不应被调用，保留以防意外）
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  return renderProgressWorkspace(container, productId, selectedSteps, {});
+}
+
+export function renderAbortedState(productId, data = {}) {
+  initPreview();
+  return renderProgressWorkspace(document.body, productId, null, {})
+    .then(() => showAbortedState(productId, data));
 }

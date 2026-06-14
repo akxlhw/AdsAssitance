@@ -49,6 +49,7 @@ class ProductPipeline:
         vision_adapter: TextAdapter | None = None,
         enabled_steps: set[str] | None = None,
         abort_callback: Callable[[], None] | None = None,
+        image_timeout_sec: float | None = None,
     ) -> None:
         self.text_adapter = text_adapter
         self.image_adapter = image_adapter
@@ -62,6 +63,8 @@ class ProductPipeline:
         self.enabled_steps = enabled_steps or set(self.STEP_DEPENDENCIES.keys())
         self.required_steps = self._compute_required_steps(self.enabled_steps)
         self._abort_callback = abort_callback
+        # None = 走 generator 内部默认（config.DEFAULT_IMAGE_TIMEOUT_SEC）
+        self.image_timeout_sec = image_timeout_sec
 
     def _compute_required_steps(self, enabled: set[str]) -> set[str]:
         """计算需要执行的步骤集合（包含上游依赖）。"""
@@ -291,6 +294,7 @@ class ProductPipeline:
                 delay=self.request_delay,
                 progress_callback=_image_progress,
                 abort_callback=self._check_abort,
+                per_image_timeout_sec=self.image_timeout_sec,
             )
         else:
             logger.info("所有图片已存在，跳过图片生成")

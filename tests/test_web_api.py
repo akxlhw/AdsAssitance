@@ -120,6 +120,57 @@ def test_generate_endpoint() -> None:
     mock_run.assert_called_once_with("test-prod", all_steps)
 
 
+def test_generate_resets_stale_completed_status(tmp_path, monkeypatch) -> None:
+    """重新生成同名商品时，/generate 应同步把旧 completed 状态重置为 pending，
+    避免前端在后台线程启动前误跳到结果页。"""
+    from coupangads.core import config
+
+    monkeypatch.setattr(config, "DEFAULT_OUTPUT_DIR", tmp_path)
+    safe_id = "test-prod"
+    output_dir = tmp_path / safe_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    # 模拟上次生成遗留的 completed 状态文件
+    stale_status = {
+        "product_id": safe_id,
+        "status": "completed",
+        "progress": 100,
+        "message": "全部完成",
+    }
+    (output_dir / ".status.json").write_text(
+        json.dumps(stale_status, ensure_ascii=False), encoding="utf-8"
+    )
+
+    with patch("coupangads.web.api._run_pipeline"):
+        response = client.post("/api/generate/test-prod")
+    assert response.status_code == 200
+
+    # generate 返回后应立即读取到 pending，而不是旧的 completed
+    status_response = client.get(f"/api/status/{safe_id}")
+    assert status_response.status_code == 200
+    data = status_response.json()
+    assert data["status"] == "pending"
+    assert data["progress"] == 0
+
+
+def test_generate_uses_safe_id_for_state(tmp_path, monkeypatch) -> None:
+    """/generate 对 unsafe 的 product_id 应使用 safe_name 作为状态键。"""
+    from coupangads.core import config
+
+    monkeypatch.setattr(config, "DEFAULT_OUTPUT_DIR", tmp_path)
+    product_id = "bad..name"
+    safe_id = api._safe_name(product_id)
+
+    with patch("coupangads.web.api._run_pipeline") as mock_run:
+        response = client.post(f"/api/generate/{product_id}")
+    assert response.status_code == 200
+    assert response.json()["product_id"] == safe_id
+    mock_run.assert_called_once_with(safe_id, set(ProductPipeline.STEP_DEPENDENCIES.keys()))
+
+    status_response = client.get(f"/api/status/{product_id}")
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "pending"
+
+
 def test_generate_endpoint_with_custom_steps() -> None:
     """确认 /generate 支持自定义 steps 参数。"""
     with patch("coupangads.web.api._run_pipeline") as mock_run:

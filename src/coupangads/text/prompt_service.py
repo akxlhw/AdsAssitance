@@ -112,9 +112,12 @@ class PromptService:
         return self._loader.load(canonical)
 
     def update_prompt(self, name: str, content: str) -> None:
-        """更新指定 Prompt 的内容并持久化到覆盖层；未知 Prompt 会抛出 KeyError。"""
+        """更新指定 Prompt 的内容并持久化到覆盖层；未知 Prompt 会抛出 KeyError。
+
+        若当前已有覆盖且新内容不同，先把旧覆盖写入 history 目录作为快照。
+        """
         canonical = self._resolve_name(name)
-        self._loader.save_override(canonical, content)
+        self._loader.save_override_with_snapshot(canonical, content)
 
     def reset_prompt(self, name: str) -> None:
         """重置指定 Prompt 为默认模板；未知 Prompt 会抛出 KeyError。"""
@@ -125,3 +128,20 @@ class PromptService:
         """返回指定 Prompt 是否被覆盖；未知 Prompt 会抛出 KeyError。"""
         canonical = self._resolve_name(name)
         return self._loader.is_overridden(canonical)
+
+    # ----- 版本历史透传 -----
+
+    def list_history(self, name: str) -> list[dict]:
+        """列出指定 Prompt 的历史快照。"""
+        canonical = self._resolve_name(name)
+        return self._loader.list_history(canonical)
+
+    def read_history(self, name: str, snapshot_id: str) -> str | None:
+        """读取指定 Prompt 的某条历史快照；不存在返回 None。"""
+        canonical = self._resolve_name(name)
+        return self._loader.read_history(canonical, snapshot_id)
+
+    def restore_history(self, name: str, snapshot_id: str) -> str | None:
+        """把指定 Prompt 的某条快照恢复为当前覆盖；不存在返回 None。"""
+        canonical = self._resolve_name(name)
+        return self._loader.restore_history(canonical, snapshot_id)

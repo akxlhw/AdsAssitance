@@ -44,3 +44,14 @@ RUN_LOG_FILE = "run.log"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_REQUEST_DELAY = 2.0
 DEFAULT_REQUEST_TIMEOUT_MS = 300_000
+
+# 单张图 pipeline 层超时（秒）：超过此值即使 adapter 还没返回也跳过该图
+# 真实生成单张 1-2 分钟，给到 5 分钟留足重试 + 网络抖动空间
+DEFAULT_IMAGE_TIMEOUT_SEC = 300
+
+# Mock 适配器模拟参数（默认 0 = 即时返回，测试友好）
+# UI/进度测试时可通过环境变量调大，模拟真实生成耗时
+MOCK_IMAGE_DELAY_SEC = 0.0          # 每张 mock 图的等待秒数
+MOCK_TEXT_DELAY_SEC = 0.0           # 每个 mock 文本步骤的等待秒数
+MOCK_IMAGE_FAIL_RATE = 0.0          # mock 图片随机失败率（0~1）
+MOCK_IMAGE_HANG_RATE = 0.0          # mock 图片随机卡死率（0~1，卡死会触发 pipeline 超时）

@@ -47,6 +47,13 @@ class PromptUpdateRequest(BaseModel):
     content: str = Field(..., max_length=1_000_000)
 
 
+class PromptPreviewRequest(BaseModel):
+    """Prompt 预览请求体。"""
+
+    product_id: str | None = None
+    sample_data: dict | None = None
+
+
 # 内存中的任务状态（MVP 简版，v2.0 迁移到数据库）
 _task_states: dict[str, dict] = {}
 
@@ -91,6 +98,18 @@ def _resolve_under(base: Path, *parts: str) -> Path:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid path") from exc
     return target
+
+
+def _read_image_timeout() -> float | None:
+    """读 COUPANGADS_IMAGE_TIMEOUT_SEC，None/<=0 表示用 generator 默认值。"""
+    raw = os.environ.get("COUPANGADS_IMAGE_TIMEOUT_SEC")
+    if raw is None or raw == "":
+        return None
+    try:
+        v = float(raw)
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _load_provider_config() -> dict:
@@ -191,13 +210,21 @@ def _run_pipeline(product_id: str, enabled_steps: set[str] | None = None) -> Non
         nonlocal completed_steps
         step = data.get("step")
         status = data.get("status")
+        progress = data.get("progress", 0)
         if step and status == "completed":
             completed_steps.add(step)
         elif step and status in ("started", "running", "pending"):
             completed_steps.discard(step)
 
+        # 流水线把每个步骤完成都标记为 "completed"，但前端会把它当成整单完成。
+        # 只有进度达到 100 时才保留 "completed"，其余步骤完成显示为 "running"。
+        display_status = status
+        if status == "completed" and progress < 100:
+            display_status = "running"
+
         state = {
             **data,
+            "status": display_status,
             "completed_steps": sorted(completed_steps),
             "created_at": created_at,
         }
@@ -252,6 +279,7 @@ def _run_pipeline(product_id: str, enabled_steps: set[str] | None = None) -> Non
             request_delay=2.0,
             enabled_steps=enabled_steps,
             abort_callback=check_abort,
+            image_timeout_sec=_read_image_timeout(),
         )
         pipeline.run(input_dir, output_dir)
         text_files = [
@@ -335,12 +363,18 @@ async def generate_product(product_id: str, payload: dict | None = None):
             )
         enabled_steps = set(steps)
 
-    _task_states[product_id] = {"status": "pending", "progress": 0, "message": "任务排队中"}
+    safe_id = _safe_name(product_id)
+    pending_state = {"status": "pending", "progress": 0, "message": "任务排队中"}
+    # 同步重置内存状态与持久化文件，避免前端在后台线程启动前读到旧的 completed 状态。
+    _task_states[safe_id] = pending_state
+    _write_status_file(safe_id, pending_state)
+    _clear_abort_flag(safe_id)
+
     thread = threading.Thread(
-        target=_run_pipeline, args=(product_id, enabled_steps), daemon=True
+        target=_run_pipeline, args=(safe_id, enabled_steps), daemon=True
     )
     thread.start()
-    return {"status": "started", "product_id": product_id, "steps": sorted(enabled_steps)}
+    return {"status": "started", "product_id": safe_id, "steps": sorted(enabled_steps)}
 
 
 @router.post("/abort/{product_id}")
@@ -372,9 +406,11 @@ async def get_task_status(product_id: str):
 @router.get("/progress/{product_id}")
 async def progress_stream(product_id: str):
     """SSE 实时进度流。"""
+    safe_id = _safe_name(product_id)
+
     async def event_generator():
         while True:
-            state = _task_states.get(product_id, {"progress": 0, "status": "unknown"})
+            state = _task_states.get(safe_id, {"progress": 0, "status": "unknown"})
             status = state.get("status")
             progress = state.get("progress", 0)
 
@@ -546,6 +582,18 @@ def _scan_products() -> list[dict]:
         if images:
             thumbnail = f"/api/result/{product_id}/{images[0].name}"
 
+        input_dir = _resolve_under(config.DEFAULT_INPUT_DIR, product_id)
+        input_files = []
+        if input_dir.exists():
+            input_files = [
+                {
+                    "filename": p.name,
+                    "url": f"/api/products/{product_id}/input/{p.name}",
+                }
+                for p in sorted(input_dir.iterdir())
+                if p.is_file()
+            ]
+
         products.append(
             {
                 "product_id": product_id,
@@ -558,6 +606,7 @@ def _scan_products() -> list[dict]:
                 "text_count": text_count,
                 "image_count": image_count,
                 "thumbnail": thumbnail,
+                "input_files": input_files,
             }
         )
     return products
@@ -567,6 +616,168 @@ def _scan_products() -> list[dict]:
 async def list_products():
     """返回商品卡片列表。"""
     return {"products": _scan_products()}
+
+
+@router.get("/products/{product_id}/input/{filename}")
+async def serve_input_file(product_id: str, filename: str):
+    """提供商品原始图片预览。"""
+    safe_id = _safe_name(product_id)
+    safe_filename = _safe_filename(filename)
+    input_dir = _resolve_under(config.DEFAULT_INPUT_DIR, safe_id)
+    file_path = input_dir / safe_filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path)
+
+
+@router.delete("/products/{product_id}")
+async def delete_product(product_id: str):
+    """删除商品及其输入、输出目录。"""
+    safe_id = _safe_name(product_id)
+    input_dir = _resolve_under(config.DEFAULT_INPUT_DIR, safe_id)
+    output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, safe_id)
+
+    if not input_dir.exists() and not output_dir.exists():
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    import shutil
+
+    if input_dir.exists():
+        shutil.rmtree(input_dir)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    _task_states.pop(safe_id, None)
+    return {"status": "deleted", "product_id": safe_id}
+
+
+class RenameRequest(BaseModel):
+    """商品重命名请求体。"""
+
+    new_product_id: str = Field(..., min_length=1, max_length=120)
+
+
+@router.patch("/products/{product_id}")
+async def rename_product(product_id: str, payload: RenameRequest):
+    """重命名商品，同时迁移 input/output 目录。"""
+    safe_id = _safe_name(product_id)
+    new_safe_id = _safe_name(payload.new_product_id)
+    if safe_id == new_safe_id:
+        raise HTTPException(status_code=400, detail="新名称与旧名称相同")
+
+    input_dir = _resolve_under(config.DEFAULT_INPUT_DIR, safe_id)
+    output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, safe_id)
+    new_input_dir = _resolve_under(config.DEFAULT_INPUT_DIR, new_safe_id)
+    new_output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, new_safe_id)
+
+    if not input_dir.exists() and not output_dir.exists():
+        raise HTTPException(status_code=404, detail="Product not found")
+    if new_input_dir.exists() or new_output_dir.exists():
+        raise HTTPException(status_code=409, detail="目标名称已存在")
+
+    import shutil
+
+    if input_dir.exists():
+        shutil.move(str(input_dir), str(new_input_dir))
+    if output_dir.exists():
+        shutil.move(str(output_dir), str(new_output_dir))
+
+    # 更新 status 文件中的 product_id
+    status_path = new_output_dir / ".status.json"
+    if status_path.exists():
+        try:
+            data = json.loads(status_path.read_text(encoding="utf-8"))
+            data["product_id"] = new_safe_id
+            write_text_file(status_path, json.dumps(data, ensure_ascii=False, indent=2))
+        except Exception:
+            pass
+
+    _task_states.pop(safe_id, None)
+    return {"status": "renamed", "product_id": safe_id, "new_product_id": new_safe_id}
+
+
+@router.put("/products/{product_id}")
+async def update_product(
+    product_id: str,
+    product_name: str = Form(""),
+    keep_files: list[str] = Form(default_factory=list),
+    files: list[UploadFile] = File(default_factory=list),
+):
+    """编辑商品资料：可改名、保留/删除已有图片、追加新图。"""
+    safe_id = _safe_name(product_id)
+    input_dir = _resolve_under(config.DEFAULT_INPUT_DIR, safe_id)
+    output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, safe_id)
+
+    if not input_dir.exists():
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    new_safe_id = _safe_name(product_name) if product_name.strip() else safe_id
+    if new_safe_id != safe_id:
+        new_input_dir = _resolve_under(config.DEFAULT_INPUT_DIR, new_safe_id)
+        new_output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, new_safe_id)
+        if new_input_dir.exists() or new_output_dir.exists():
+            raise HTTPException(status_code=409, detail="目标名称已存在")
+
+    keep_set = {_safe_filename(name) for name in keep_files}
+
+    # 删除不在保留列表中的旧文件
+    if input_dir.exists():
+        for existing in list(input_dir.iterdir()):
+            if existing.is_file() and existing.name not in keep_set:
+                existing.unlink()
+
+    # 写入新文件
+    if new_safe_id != safe_id:
+        # 先重命名目录，再写入新文件
+        import shutil
+
+        shutil.move(str(input_dir), str(new_input_dir))
+        if output_dir.exists():
+            shutil.move(str(output_dir), str(new_output_dir))
+        target_input_dir = new_input_dir
+        target_output_dir = new_output_dir
+    else:
+        target_input_dir = input_dir
+        target_output_dir = output_dir
+
+    target_input_dir.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for file in files:
+        safe_filename = _safe_filename(file.filename or "unnamed")
+        target = target_input_dir / safe_filename
+        content = await file.read()
+        target.write_bytes(content)
+        saved.append(safe_filename)
+
+    # 更新 status 文件中的 product_id
+    status_path = target_output_dir / ".status.json"
+    if status_path.exists():
+        try:
+            data = json.loads(status_path.read_text(encoding="utf-8"))
+            data["product_id"] = new_safe_id
+            write_text_file(status_path, json.dumps(data, ensure_ascii=False, indent=2))
+        except Exception:
+            pass
+
+    return {
+        "status": "updated",
+        "product_id": safe_id,
+        "new_product_id": new_safe_id,
+        "kept": sorted(keep_set),
+        "saved": saved,
+    }
+
+
+@router.delete("/result/{product_id}/{filename}")
+async def delete_result_file(product_id: str, filename: str):
+    """删除单个结果文件（图片或 markdown）。"""
+    safe_id = _safe_name(product_id)
+    safe_filename = _safe_filename(filename)
+    output_dir = _resolve_under(config.DEFAULT_OUTPUT_DIR, safe_id)
+    file_path = output_dir / safe_filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    file_path.unlink()
+    return {"status": "deleted", "product_id": safe_id, "filename": safe_filename}
 
 
 @router.get("/prompts")
@@ -638,3 +849,176 @@ async def reset_prompt(name: str):
         logger.error(f"删除/重置 Prompt 覆盖失败: {exc}")
         raise HTTPException(status_code=500, detail="删除/重置 Prompt 覆盖失败")
     return {"status": "reset", "name": name}
+
+
+@router.get("/prompts/{name}/history")
+async def list_prompt_history(name: str):
+    """列出指定 prompt 的历史快照（按时间倒序）。"""
+    service = get_prompt_service()
+    try:
+        # 触发 _resolve_name 校验
+        service.get_prompt_meta(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"未找到 Prompt: {name}")
+    return service.list_history(name)
+
+
+@router.get("/prompts/{name}/history/{snapshot_id}")
+async def get_prompt_history(name: str, snapshot_id: str):
+    """读取指定 prompt 的某条历史快照内容。"""
+    service = get_prompt_service()
+    try:
+        service.get_prompt_meta(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"未找到 Prompt: {name}")
+    try:
+        content = service.read_history(name, snapshot_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if content is None:
+        raise HTTPException(status_code=404, detail="快照不存在")
+    return {"id": snapshot_id, "content": content}
+
+
+@router.post("/prompts/{name}/history/{snapshot_id}/restore")
+async def restore_prompt_history(name: str, snapshot_id: str):
+    """把指定快照恢复为当前覆盖。"""
+    service = get_prompt_service()
+    try:
+        service.get_prompt_meta(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"未找到 Prompt: {name}")
+    try:
+        restored = service.restore_history(name, snapshot_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        logger = get_logger("api.prompts")
+        logger.error(f"恢复 Prompt 历史快照失败: {exc}")
+        raise HTTPException(status_code=500, detail="恢复 Prompt 历史快照失败")
+    if restored is None:
+        raise HTTPException(status_code=404, detail="快照不存在")
+    return {"status": "restored", "name": name, "snapshot_id": snapshot_id}
+
+
+@router.post("/prompts/{name}/preview")
+async def preview_prompt(name: str, payload: PromptPreviewRequest):
+    """用真实产品数据或样本数据渲染指定 prompt 模板。
+
+    复用 text/template_loader.assemble_text_prompt 与
+    image_pipeline/prompt_assembler 的纯函数逻辑。
+    """
+    service = get_prompt_service()
+    try:
+        meta = service.get_prompt_meta(name)
+        template = service.get_prompt(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"未找到 Prompt: {name}")
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"模板文件不存在: {name}"
+        )
+
+    from coupangads.text.template_loader import assemble_text_prompt
+    from coupangads.image_pipeline.prompt_assembler import (
+        build_product_context,
+    )
+
+    # 收集渲染所需变量
+    variables = meta.variables
+    data: dict[str, str] = {}
+    product_dir: Path | None = None
+    if payload.product_id:
+        candidate = config.DEFAULT_OUTPUT_DIR / _safe_name(payload.product_id)
+        if candidate.exists():
+            product_dir = candidate
+
+    def _read_product_file(filename: str) -> str:
+        if product_dir is None:
+            return ""
+        path = product_dir / filename
+        if not path.exists():
+            return ""
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    # 通用文本类模板：填入对应上游产物
+    text_var_map = {
+        "image_count": lambda: str(
+            len(list(product_dir.parent.joinpath(
+                config.DEFAULT_INPUT_DIR.name, payload.product_id or ""
+            ).glob("*"))) if product_dir else "5"
+        ),
+        "product_report": lambda: _read_product_file(config.PRODUCT_REPORT_FILE),
+        "product_title": lambda: _read_product_file(config.PRODUCT_TITLE_FILE),
+        "wing_keywords": lambda: _read_product_file(config.WING_KEYWORDS_FILE),
+        "selling_points": lambda: _read_product_file(config.SELLING_POINTS_FILE),
+    }
+    # image_prompt.txt 特殊处理：5 变量
+    image_var_keys = {"style_rules", "product_context", "screen", "block", "block_content"}
+
+    rendered: str
+    if variables and set(variables) <= text_var_map.keys():
+        for v in variables:
+            data[v] = text_var_map[v]()
+        rendered = assemble_text_prompt(template, **data)
+    elif set(variables) == image_var_keys:
+        # 图片 prompt：渲染两条样本（A 风格 + B 风格 × B1 屏）
+        import json as _json
+        selling_points_json_path = (
+            product_dir / config.SELLING_POINTS_JSON_FILE
+            if product_dir else None
+        )
+        selling_points: dict[str, str] = {}
+        if selling_points_json_path and selling_points_json_path.exists():
+            try:
+                selling_points = _json.loads(
+                    selling_points_json_path.read_text(encoding="utf-8")
+                )
+            except (ValueError, OSError):
+                selling_points = {}
+
+        global_constraints = service.get_prompt("image_global_constraints.txt") if service.get_prompt_meta("image_global_constraints.txt") else ""
+        style_rules_text = ""
+        try:
+            style_rules_text = service.get_prompt("style_rules.txt")
+        except (KeyError, FileNotFoundError):
+            style_rules_text = ""
+
+        from coupangads.text.parsers import extract_style_rules
+        style_map = extract_style_rules(style_rules_text) or {"A": "默认 A 风格规则"}
+        product_context = build_product_context(
+            product_report=text_var_map["product_report"]() or "[商品画像示例]",
+            product_title=text_var_map["product_title"]() or "[商品标题示例]",
+            keywords=text_var_map["wing_keywords"]() or "[关键词示例]",
+            global_constraints=global_constraints or "[全局约束示例]",
+        )
+        samples: list[dict] = []
+        for style_code, style_rule in list(style_map.items())[:2]:
+            block = "B1"
+            content = selling_points.get(block) or f"[{block} 卖点示例]"
+            from coupangads.text.template_loader import assemble_image_prompt
+            text = assemble_image_prompt(
+                template=template,
+                style_rules=style_rule or f"[{style_code} 风格规则]",
+                product_context=product_context,
+                screen=f"第 {block[1]} 屏",
+                block=block,
+                block_content=content,
+            )
+            samples.append({
+                "style": style_code,
+                "block": block,
+                "rendered": text,
+            })
+        rendered = "\n\n---\n\n".join(
+            f"### 样本 {i + 1}（风格 {s['style']} · {s['block']}）\n\n{s['rendered']}"
+            for i, s in enumerate(samples)
+        )
+    else:
+        # 无变量模板（style_rules / image_global_constraints）：原文返回
+        rendered = template
+
+    return {"name": name, "rendered": rendered, "sample_count": len(variables)}
